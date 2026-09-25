@@ -1,26 +1,9 @@
--- ============================================================================
--- CryptisDchat — схема основной базы данных (MariaDB 11.4, InnoDB, utf8mb4)
---
--- Применяется автоматически при ПЕРВОЙ инициализации тома mariadb_data
--- (смонтирован в /docker-entrypoint-initdb.d/). Структура совпадает с ORM-моделями
--- backend/app/models/*; соответствие проверяет tests/test_schema_sql.py.
---
--- Принципы:
---   * UUID-ключи — CHAR(36) ASCII (ТЗ 4.2: UUID — первичный ключ пользователя
---     и внутренний идентификатор во всех связанных таблицах);
---   * сервер хранит только шифротекст, публичные ключи и обёрнутые ключи (ТЗ 6, 7);
---   * время — DATETIME(6) в UTC.
--- ============================================================================
-
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 
 CREATE DATABASE IF NOT EXISTS cryptisdchat CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE cryptisdchat;
 
--- ---------------------------------------------------------------------------
--- 1. Пользователи, кошельки, устройства, сессии (ТЗ 4, 4.2)
--- ---------------------------------------------------------------------------
 CREATE TABLE users (
     id                   CHAR(36)     CHARACTER SET ascii NOT NULL,
     display_name         VARCHAR(50)  NOT NULL DEFAULT '',
@@ -41,9 +24,9 @@ CREATE TABLE users (
 CREATE TABLE user_wallets (
     id                CHAR(36)    CHARACTER SET ascii NOT NULL,
     user_id           CHAR(36)    CHARACTER SET ascii NOT NULL,
-    address           VARCHAR(80) CHARACTER SET ascii NOT NULL,   -- raw "0:<hex>"
+    address           VARCHAR(80) CHARACTER SET ascii NOT NULL,
     friendly_address  VARCHAR(64) CHARACTER SET ascii NOT NULL DEFAULT '',
-    public_key        CHAR(64)    CHARACTER SET ascii NOT NULL,   -- ed25519, hex
+    public_key        CHAR(64)    CHARACTER SET ascii NOT NULL,
     network           VARCHAR(8)  CHARACTER SET ascii NOT NULL DEFAULT '-239',
     is_primary        BOOLEAN     NOT NULL DEFAULT TRUE,
     linked_at         DATETIME(6) NOT NULL,
@@ -54,22 +37,21 @@ CREATE TABLE user_wallets (
 ) ENGINE=InnoDB;
 
 CREATE TABLE devices (
-    id            CHAR(36)     CHARACTER SET ascii NOT NULL,
-    user_id       CHAR(36)     CHARACTER SET ascii NOT NULL,
-    name          VARCHAR(100) NOT NULL DEFAULT 'Web browser',
-    user_agent    VARCHAR(255) NOT NULL DEFAULT '',
-    ip_address    VARCHAR(45)  CHARACTER SET ascii NOT NULL DEFAULT '',
-    created_at    DATETIME(6)  NOT NULL,
-    last_seen_at  DATETIME(6)  NOT NULL,
-    revoked_at    DATETIME(6)  NULL,
-    client_key_hash   CHAR(64)    CHARACTER SET ascii NULL,  -- SHA-256 от device_key браузера
-    tokens_revoked_at DATETIME(6) NULL,                      -- JWT, выданные раньше, недействительны
+    id                CHAR(36)     CHARACTER SET ascii NOT NULL,
+    user_id           CHAR(36)     CHARACTER SET ascii NOT NULL,
+    name              VARCHAR(100) NOT NULL DEFAULT 'Web browser',
+    user_agent        VARCHAR(255) NOT NULL DEFAULT '',
+    ip_address        VARCHAR(45)  CHARACTER SET ascii NOT NULL DEFAULT '',
+    created_at        DATETIME(6)  NOT NULL,
+    last_seen_at      DATETIME(6)  NOT NULL,
+    revoked_at        DATETIME(6)  NULL,
+    client_key_hash   CHAR(64)     CHARACTER SET ascii NULL,
+    tokens_revoked_at DATETIME(6)  NULL,
     PRIMARY KEY (id),
     KEY ix_devices_user_id (user_id),
     CONSTRAINT fk_devices_user_id FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Refresh-токен — UUID; в базе лежит только SHA-256 от него (утечка дампа ≠ утечка сессий)
 CREATE TABLE refresh_tokens (
     id              CHAR(36)    CHARACTER SET ascii NOT NULL,
     user_id         CHAR(36)    CHARACTER SET ascii NOT NULL,
@@ -102,16 +84,13 @@ CREATE TABLE push_tokens (
     CONSTRAINT fk_push_tokens_device_id FOREIGN KEY (device_id) REFERENCES devices (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------------
--- 2. Чаты и участники
--- ---------------------------------------------------------------------------
 CREATE TABLE threads (
     id                    CHAR(36)    CHARACTER SET ascii NOT NULL,
     kind                  ENUM('direct','group') NOT NULL,
     title                 VARCHAR(80) NULL,
     avatar_upload_id      CHAR(36)    CHARACTER SET ascii NULL,
     avatar_tint           VARCHAR(32) NOT NULL DEFAULT 'hsl(265 40% 48%)',
-    direct_key            VARCHAR(73) CHARACTER SET ascii NULL,  -- "uuidA:uuidB", один личный чат на пару
+    direct_key            VARCHAR(73) CHARACTER SET ascii NULL,
     created_by            CHAR(36)    CHARACTER SET ascii NOT NULL,
     created_at            DATETIME(6) NOT NULL,
     updated_at            DATETIME(6) NOT NULL,
@@ -147,7 +126,6 @@ CREATE TABLE thread_members (
     CONSTRAINT fk_thread_members_user_id FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Журнал изменений состава групп; каждое изменение — отдельная TON-транзакция (ТЗ 2, 6.8)
 CREATE TABLE group_membership_events (
     id               CHAR(36)    CHARACTER SET ascii NOT NULL,
     thread_id        CHAR(36)    CHARACTER SET ascii NOT NULL,
@@ -170,11 +148,10 @@ CREATE TABLE group_membership_events (
     CONSTRAINT fk_group_membership_events_actor_id FOREIGN KEY (actor_id) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
--- TreeKEM-подобное дерево ключей группы: публичные ключи узлов (ТЗ 6.8)
 CREATE TABLE group_tree_nodes (
     thread_id      CHAR(36)    CHARACTER SET ascii NOT NULL,
     node_index     INT         NOT NULL,
-    public_key     TEXT        CHARACTER SET ascii NULL,        -- SPKI base64, NULL = пустой узел
+    public_key     TEXT        CHARACTER SET ascii NULL,
     owner_user_id  CHAR(36)    CHARACTER SET ascii NULL,
     epoch          INT         NOT NULL DEFAULT 0,
     updated_at     DATETIME(6) NOT NULL,
@@ -197,15 +174,12 @@ CREATE TABLE group_key_commits (
     CONSTRAINT fk_group_key_commits_committer_id FOREIGN KEY (committer_id) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------------
--- 3. Криптографический материал (ТЗ 6): только публичные ключи и обёрнутые блобы
--- ---------------------------------------------------------------------------
 CREATE TABLE user_key_sets (
     id            CHAR(36)    CHARACTER SET ascii NOT NULL,
     user_id       CHAR(36)    CHARACTER SET ascii NOT NULL,
     version       INT         NOT NULL,
-    identity_pub  TEXT        CHARACTER SET ascii NOT NULL,   -- ECDH P-256, SPKI base64
-    signing_pub   TEXT        CHARACTER SET ascii NOT NULL,   -- ECDSA P-256, SPKI base64
+    identity_pub  TEXT        CHARACTER SET ascii NOT NULL,
+    signing_pub   TEXT        CHARACTER SET ascii NOT NULL,
     is_active     BOOLEAN     NOT NULL DEFAULT TRUE,
     created_at    DATETIME(6) NOT NULL,
     PRIMARY KEY (id),
@@ -219,7 +193,7 @@ CREATE TABLE conversation_keys (
     epoch                  INT         NOT NULL,
     recipient_id           CHAR(36)    CHARACTER SET ascii NOT NULL,
     recipient_key_version  INT         NOT NULL,
-    wrapped_key            TEXT        CHARACTER SET ascii NOT NULL,  -- ECIES (ECDH P-256 + AES-128-GCM)
+    wrapped_key            TEXT        CHARACTER SET ascii NOT NULL,
     created_by             CHAR(36)    CHARACTER SET ascii NOT NULL,
     created_at             DATETIME(6) NOT NULL,
     PRIMARY KEY (id),
@@ -232,7 +206,7 @@ CREATE TABLE conversation_keys (
 CREATE TABLE key_backups (
     user_id         CHAR(36)    CHARACTER SET ascii NOT NULL,
     version         INT         NOT NULL DEFAULT 1,
-    ciphertext      MEDIUMBLOB  NOT NULL,        -- пакет ключей под случайным K (AES-256-GCM)
+    ciphertext      MEDIUMBLOB  NOT NULL,
     kdf_salt        VARCHAR(64) CHARACTER SET ascii NOT NULL,
     kdf_iterations  INT         NOT NULL,
     threshold       INT         NOT NULL DEFAULT 2,
@@ -269,19 +243,16 @@ CREATE TABLE key_recovery_requests (
     CONSTRAINT fk_key_recovery_requests_user_id FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------------
--- 4. Сообщения и вложения (только шифротекст)
--- ---------------------------------------------------------------------------
 CREATE TABLE messages (
     id                  CHAR(36)      CHARACTER SET ascii NOT NULL,
     thread_id           CHAR(36)      CHARACTER SET ascii NOT NULL,
-    seq                 BIGINT        NOT NULL,           -- номер сообщения в диалоге
+    seq                 BIGINT        NOT NULL,
     sender_id           CHAR(36)      CHARACTER SET ascii NOT NULL,
     client_msg_id       CHAR(36)      CHARACTER SET ascii NOT NULL,
     kind                ENUM('text','file','system') NOT NULL DEFAULT 'text',
-    ciphertext          MEDIUMBLOB    NOT NULL,           -- XSalsa20-Poly1305
+    ciphertext          MEDIUMBLOB    NOT NULL,
     nonce               VARBINARY(24) NOT NULL,
-    signature           VARBINARY(96) NOT NULL,           -- ECDSA P-256
+    signature           VARBINARY(96) NOT NULL,
     key_epoch           INT           NOT NULL,
     sender_key_version  INT           NOT NULL,
     content_hash        CHAR(64)      CHARACTER SET ascii NOT NULL,
@@ -298,7 +269,6 @@ CREATE TABLE messages (
     CONSTRAINT fk_messages_sender_id FOREIGN KEY (sender_id) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
--- Слепой индекс для поиска по зашифрованным сообщениям (HMAC от префиксов слов)
 CREATE TABLE message_search_tokens (
     message_id  CHAR(36) CHARACTER SET ascii NOT NULL,
     token       CHAR(32) CHARACTER SET ascii NOT NULL,
@@ -325,9 +295,6 @@ CREATE TABLE attachments (
     CONSTRAINT fk_attachments_owner_id FOREIGN KEY (owner_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------------
--- 5. Блокчейн-журнал доставки (ТЗ 2; Gunicorn_Celery.md 4.2–4.3)
--- ---------------------------------------------------------------------------
 CREATE TABLE chain_batches (
     id            CHAR(36)     CHARACTER SET ascii NOT NULL,
     merkle_root   CHAR(64)     CHARACTER SET ascii NOT NULL,
@@ -365,9 +332,6 @@ CREATE TABLE chain_events (
     KEY ix_chain_events_batch_id (batch_id)
 ) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------------
--- 6. Настройки, приглашения в группы, чёрный список
--- ---------------------------------------------------------------------------
 CREATE TABLE user_settings (
     user_id              CHAR(36)    CHARACTER SET ascii NOT NULL,
     autolock             ENUM('1m','5m','30m','1h','never') NOT NULL DEFAULT '1m',
@@ -399,9 +363,6 @@ CREATE TABLE blocklist (
     CONSTRAINT fk_blocklist_blocked_user_id FOREIGN KEY (blocked_user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------------
--- 7. Администрирование (Flask-панель, ТЗ 7)
--- ---------------------------------------------------------------------------
 CREATE TABLE admin_users (
     id              INT          NOT NULL AUTO_INCREMENT,
     username        VARCHAR(64)  NOT NULL,
