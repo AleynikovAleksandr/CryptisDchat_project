@@ -30,6 +30,11 @@ CSS classes and re-rendering mechanics are preserved, and the demo data is repla
 - Sign-in with a TON wallet (TonConnect) verified via `ton_proof`: Ed25519 signature, domain, freshness, wallet `state_init` (v3r2 / v4r2 / v5r1)
 - 15-minute JWT + Refresh token, rotated on every exchange; reusing an old token revokes the device
 - List of active sessions, "End session", "Log out of all devices"
+- One browser = one device: the server issues a device key in an `HttpOnly; SameSite=Strict` cookie
+  (rotated on every sign-in, only its SHA-256 is stored), so signing in again from the same browser — even
+  after logging out — reuses the same device instead of creating a new one; tokens issued before the logout stay revoked
+- Devices with no activity for 30 days are ended automatically every night (e.g. after the browser's site data
+  was cleared); signing in from that browser again brings the same device back. Devices revoked more than 400 days ago are deleted
 - Linking a second wallet and moving the account to a new wallet
 
 **End-to-end encryption (spec section 6)**

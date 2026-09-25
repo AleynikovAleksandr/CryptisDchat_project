@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_ttl_seconds: int = 15 * 60
     refresh_token_ttl_days: int = 60
+    # устройство без входов дольше этого срока завершается (например, после очистки данных сайта)
+    device_inactive_days: int = 30
+    # срок cookie устройства (предел браузеров — 400 дней); отозванные устройства старше удаляются
+    device_cookie_max_age_days: int = 400
 
     # --- ton_proof (ТЗ 4.2) ---
     ton_proof_domain: str = "localhost:3890"

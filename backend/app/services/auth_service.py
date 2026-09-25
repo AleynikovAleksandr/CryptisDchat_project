@@ -8,7 +8,7 @@ from datetime import timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interfaces.ton_proof import TonProofRequest, VerifiedWallet
-from app.models import User, utcnow
+from app.models import Device, User, utcnow
 from app.repositories import KeyRepository, UserRepository
 from app.schemas.auth import ChallengeOut, SessionOut, TonProofVerifyIn
 from app.schemas.users import MeOut
@@ -31,6 +31,7 @@ class IssuedSession:
     access_expires_at: int
     refresh_token: str
     is_new_user: bool
+    device_key: str = ""  # новое значение cookie устройства
 
 
 class AuthService:
@@ -71,7 +72,9 @@ class AuthService:
         except TonProofError as exc:
             raise Unauthorized(str(exc), code="proof_invalid") from exc
 
-    async def login(self, body: TonProofVerifyIn, user_agent: str, ip: str) -> IssuedSession:
+    async def login(self, body: TonProofVerifyIn, user_agent: str, ip: str,
+                    device_key: str | None = None) -> IssuedSession:
+        """device_key — значение HttpOnly-cookie устройства, если браузер её прислал."""
         wallet = await self._verify_proof(body)
         existing = await self.users.wallet_by_address(wallet.address)
         is_new = existing is None
@@ -85,7 +88,7 @@ class AuthService:
             await self.users.add_wallet(user.id, wallet.address, wallet.friendly_address, wallet.public_key, wallet.network)
         if user.is_suspended:
             raise Forbidden("account suspended", code="suspended")
-        issued = await self._issue(user, body.device_name, user_agent, ip)
+        issued = await self._issue(user, body.device_name, user_agent, ip, device_key)
         issued.is_new_user = is_new
         await self.s.commit()
         return issued
@@ -116,14 +119,41 @@ class AuthService:
         await self.s.commit()
 
     # ------------------------------------------------------------------ токены
-    async def _issue(self, user: User, device_name: str, user_agent: str, ip: str) -> IssuedSession:
-        device = await self.users.create_device(user.id, device_name, user_agent, ip)
+    async def _issue(self, user: User, device_name: str, user_agent: str, ip: str,
+                     device_key: str | None = None) -> IssuedSession:
+        new_key = security.new_device_key()
+        device = await self._device_for_login(user, device_name, user_agent, ip, device_key)
+        # ключ меняется при каждом входе: украденная раньше cookie перестаёт узнавать устройство
+        device.client_key_hash = security.hash_device_key(new_key)
         refresh = security.new_refresh_token()
         expires = utcnow() + timedelta(days=self.infra.settings.refresh_token_ttl_days)
         await self.users.add_refresh_token(user.id, device.id, security.hash_refresh_token(refresh), expires)
         access, access_exp = security.create_access_token(user.id, device.id)
         return IssuedSession(user=user, access_token=access, access_expires_at=access_exp,
-                             refresh_token=refresh, is_new_user=False)
+                             refresh_token=refresh, is_new_user=False, device_key=new_key)
+
+    async def _device_for_login(self, user: User, device_name: str, user_agent: str, ip: str,
+                                device_key: str | None) -> Device:
+        """Один браузер — одно устройство: повторный вход с cookie устройства переиспользует запись.
+
+        Ключ ищется только среди устройств этого пользователя; неизвестный ключ = новое устройство.
+        """
+        device = None
+        if device_key and len(device_key) <= 128:
+            device = await self.users.device_by_client_key(user.id, security.hash_device_key(device_key))
+        if device is None:
+            return await self.users.create_device(user.id, device_name, user_agent, ip)
+        if device.revoked_at is not None:
+            # JWT, выданные до отзыва, остаются отозванными и после повторного входа
+            device.tokens_revoked_at = device.revoked_at
+            device.revoked_at = None
+        # у устройства один действующий refresh-токен — прежний больше не нужен
+        await self.users.revoke_device_refresh_tokens(device.id)
+        device.name = device_name[:100]
+        device.user_agent = user_agent[:255]
+        device.ip_address = ip[:45]
+        device.last_seen_at = utcnow()
+        return device
 
     async def refresh(self, refresh_token: str) -> tuple[str, int, str]:
         """Обмен refresh → новый JWT с ротацией refresh-токена.
@@ -172,7 +202,8 @@ class AuthService:
         if security.issued_before(claims, user.sessions_revoked_at):
             raise Unauthorized("session revoked", code="token_revoked")
         device = await self.users.get_device(claims.device_id)
-        if device is None or security.issued_before(claims, device.revoked_at):
+        if (device is None or security.issued_before(claims, device.revoked_at)
+                or security.issued_before(claims, device.tokens_revoked_at)):
             raise Unauthorized("session revoked", code="token_revoked")
         return user, claims.device_id
 

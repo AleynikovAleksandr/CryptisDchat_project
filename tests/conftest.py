@@ -225,12 +225,17 @@ class User:
         return await self.client.delete(url, headers=self.h)
 
 
-async def login(client: AsyncClient, wallet: cc.DevWallet | None = None) -> dict:
+async def login(client: AsyncClient, wallet: cc.DevWallet | None = None, device_cookie: str | None = None) -> dict:
+    """Вход кошельком. Без device_cookie — как из нового браузера; `_device` — выданная cookie устройства."""
     wallet = wallet or cc.DevWallet()
     ch = (await client.post("/api/auth/ton-proof/challenge")).json()
+    client.cookies.clear()
+    if device_cookie:
+        client.cookies.set("cx_device", device_cookie, path="/api/auth")
     r = await client.post("/api/auth/ton-proof/verify", json=wallet.proof(ch["payload"], ch["domain"]))
+    client.cookies.clear()
     assert r.status_code == 200, r.text
-    return {**r.json(), "_wallet": wallet}
+    return {**r.json(), "_wallet": wallet, "_device": r.cookies.get("cx_device"), "_set_cookie": r.headers["set-cookie"]}
 
 
 @pytest.fixture

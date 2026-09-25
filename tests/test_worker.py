@@ -9,8 +9,9 @@ from celery.exceptions import Retry
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session
 
-from app.models import Attachment, ChainBatch, Message, utcnow
+from app.models import Attachment, ChainBatch, Device, Message, utcnow
 from tests import client_crypto as cc
+from tests.conftest import login
 from tests.test_api_messaging import open_dm
 from worker.tasks import blockchain as tb
 
@@ -94,6 +95,36 @@ async def test_expired_messages_are_purged(make_user, infra):
     infra.tasks.enqueue("maintenance.purge_expired_messages")
     assert (await bob.get(f"/api/threads/{thread_id}/messages")).json()["items"] == []
 
+
+
+async def test_inactive_devices_are_ended_and_old_revoked_ones_deleted(client, infra):
+    wallet = cc.DevWallet()
+    stale, fresh = await login(client, wallet), await login(client, wallet)
+    hf = {"Authorization": f"Bearer {fresh['access_token']}"}
+    devices = {d["current"]: d["device_id"] for d in (await client.get("/api/auth/sessions", headers=hf)).json()}
+    stale_id, fresh_id = devices[False], devices[True]
+    with sync_session() as s:
+        s.execute(update(Device).where(Device.id == stale_id).values(last_seen_at=utcnow() - timedelta(days=31)))
+        s.commit()
+
+    infra.tasks.enqueue("maintenance.cleanup_devices")
+    sessions = (await client.get("/api/auth/sessions", headers=hf)).json()
+    assert [d["device_id"] for d in sessions] == [fresh_id]
+    r = await client.post("/api/auth/refresh", json={"refresh_token": stale["refresh_token"]})
+    assert r.status_code == 401
+
+    # вернулись в тот же браузер — то же устройство, а не новое
+    back = await login(client, wallet, device_cookie=stale["_device"])
+    sessions = (await client.get("/api/auth/sessions", headers={"Authorization": f"Bearer {back['access_token']}"})).json()
+    assert {d["device_id"] for d in sessions} == {stale_id, fresh_id}
+
+    # отозванное дольше срока cookie устройство вернуть нечем — удаляется
+    with sync_session() as s:
+        s.execute(update(Device).where(Device.id == stale_id).values(revoked_at=utcnow() - timedelta(days=401)))
+        s.commit()
+    infra.tasks.enqueue("maintenance.cleanup_devices")
+    with sync_session() as s:
+        assert s.get(Device, stale_id) is None and s.get(Device, fresh_id) is not None
 
 async def test_settings_roundtrip_and_validation(make_user):
     u = await make_user()

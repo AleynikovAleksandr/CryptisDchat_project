@@ -59,6 +59,7 @@ celery_app.conf.update(
         "messages-expire": {"task": "maintenance.purge_expired_messages", "schedule": 60.0},
         "unread-reconcile": {"task": "maintenance.reconcile_unread", "schedule": 600.0},
         "tokens-cleanup": {"task": "maintenance.cleanup_tokens", "schedule": crontab(hour=3, minute=0)},
+        "devices-cleanup": {"task": "maintenance.cleanup_devices", "schedule": crontab(hour=3, minute=10)},
         "db-backup": {"task": "maintenance.backup_database", "schedule": crontab(hour=4, minute=0)},
     },
 )

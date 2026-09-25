@@ -72,6 +72,75 @@ async def test_logout_single_device_keeps_others(client):
     assert (await client.get("/api/me", headers={"Authorization": f"Bearer {b['access_token']}"})).status_code == 200
 
 
+
+async def test_device_cookie_is_httponly_and_scoped_to_auth(client):
+    data = await login(client)
+    cookie = data["_set_cookie"].lower()
+    assert data["_device"] and "httponly" in cookie and "samesite=strict" in cookie and "path=/api/auth" in cookie
+
+
+async def test_same_browser_relogin_reuses_device(client):
+    wallet = cc.DevWallet()
+    a = await login(client, wallet)
+    b = await login(client, wallet, device_cookie=a["_device"])
+    hb = {"Authorization": f"Bearer {b['access_token']}"}
+    sessions = (await client.get("/api/auth/sessions", headers=hb)).json()
+    assert len(sessions) == 1 and sessions[0]["current"] is True
+    # у устройства один действующий refresh-токен: прежний погашен без признака кражи
+    r = await client.post("/api/auth/refresh", json={"refresh_token": a["refresh_token"]})
+    assert r.status_code == 401 and r.json()["error"] == "refresh_revoked"
+    assert (await client.post("/api/auth/refresh", json={"refresh_token": b["refresh_token"]})).status_code == 200
+
+    # другой браузер (без cookie) того же пользователя — отдельное устройство
+    await login(client, wallet)
+    assert len((await client.get("/api/auth/sessions", headers=hb)).json()) == 2
+
+
+async def test_device_cookie_rotates_on_every_login(client):
+    wallet = cc.DevWallet()
+    a = await login(client, wallet)
+    b = await login(client, wallet, device_cookie=a["_device"])
+    assert b["_device"] != a["_device"]
+    # старая (например, украденная) cookie устройство больше не узнаёт
+    c = await login(client, wallet, device_cookie=a["_device"])
+    sessions = (await client.get("/api/auth/sessions", headers={"Authorization": f"Bearer {c['access_token']}"})).json()
+    assert len(sessions) == 2
+
+
+async def test_device_cookie_is_scoped_to_user(client):
+    a = await login(client, cc.DevWallet())
+    b = await login(client, cc.DevWallet(), device_cookie=a["_device"])
+    sa = (await client.get("/api/auth/sessions", headers={"Authorization": f"Bearer {a['access_token']}"})).json()
+    sb = (await client.get("/api/auth/sessions", headers={"Authorization": f"Bearer {b['access_token']}"})).json()
+    assert len(sa) == 1 and len(sb) == 1 and sa[0]["device_id"] != sb[0]["device_id"]
+    # чужая cookie не трогает устройство первого пользователя
+    assert (await client.post("/api/auth/refresh", json={"refresh_token": a["refresh_token"]})).status_code == 200
+
+
+async def test_relogin_after_logout_revives_device_but_not_old_tokens(client):
+    wallet = cc.DevWallet()
+    a = await login(client, wallet)
+    ha = {"Authorization": f"Bearer {a['access_token']}"}
+    device_id = (await client.get("/api/auth/sessions", headers=ha)).json()[0]["device_id"]
+    assert (await client.post("/api/auth/logout", headers=ha)).status_code == 204
+
+    b = await login(client, wallet, device_cookie=a["_device"])
+    hb = {"Authorization": f"Bearer {b['access_token']}"}
+    sessions = (await client.get("/api/auth/sessions", headers=hb)).json()
+    assert [s["device_id"] for s in sessions] == [device_id]
+    # JWT, выданный до выхода, остаётся отозванным
+    r = await client.get("/api/me", headers=ha)
+    assert r.status_code == 401 and r.json()["error"] == "token_revoked"
+    assert (await client.post("/api/auth/refresh", json={"refresh_token": a["refresh_token"]})).status_code == 401
+
+
+async def test_garbage_device_cookie_creates_new_device(client):
+    data = await login(client, device_cookie="x" * 500)
+    sessions = (await client.get("/api/auth/sessions",
+                                 headers={"Authorization": f"Bearer {data['access_token']}"})).json()
+    assert len(sessions) == 1
+
+
 async def test_profile_and_wallet_rules(make_user, client):
     u = await make_user("Alice")
     r = await u.patch("/api/me", {"username": "@Alice_1", "bio": "hi"})

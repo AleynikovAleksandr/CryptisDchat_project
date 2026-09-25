@@ -83,6 +83,19 @@ class UserRepository:
         await self.s.flush()
         return device
 
+    async def device_by_client_key(self, user_id: str, client_key_hash: str) -> Device | None:
+        return await self.s.scalar(
+            select(Device).where(Device.user_id == user_id, Device.client_key_hash == client_key_hash)
+            .order_by(Device.last_seen_at.desc()).limit(1)
+        )
+
+    async def revoke_device_refresh_tokens(self, device_id: str) -> None:
+        """Погасить refresh-токены устройства без признака кражи (replaced_by_id не ставится)."""
+        await self.s.execute(
+            update(RefreshToken).where(RefreshToken.device_id == device_id, RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=utcnow())
+        )
+
     async def get_device(self, device_id: str) -> Device | None:
         return await self.s.get(Device, device_id)
 

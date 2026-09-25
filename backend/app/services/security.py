@@ -2,12 +2,15 @@
 
 * access — короткоживущий JWT (15 мин), `sub` = UUID пользователя, `did` = UUID устройства;
 * refresh — случайный UUID4, в БД хранится только его SHA-256;
-* отзыв: JWT, выданный раньше `users.sessions_revoked_at` или `devices.revoked_at`,
-  отклоняется даже до истечения срока.
+* отзыв: JWT, выданный раньше `users.sessions_revoked_at`, `devices.revoked_at`
+  или `devices.tokens_revoked_at`, отклоняется даже до истечения срока;
+* device_key — ключ браузера, выдаётся сервером в HttpOnly-cookie и меняется при каждом входе;
+  в БД хранится только его SHA-256.
 """
 from __future__ import annotations
 
 import hashlib
+import secrets
 import time
 import uuid
 from dataclasses import dataclass
@@ -78,3 +81,11 @@ def new_refresh_token() -> str:
 
 def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
+
+
+def new_device_key() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_device_key(key: str) -> str:
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()

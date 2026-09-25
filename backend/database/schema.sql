@@ -62,6 +62,8 @@ CREATE TABLE devices (
     created_at    DATETIME(6)  NOT NULL,
     last_seen_at  DATETIME(6)  NOT NULL,
     revoked_at    DATETIME(6)  NULL,
+    client_key_hash   CHAR(64)    CHARACTER SET ascii NULL,  -- SHA-256 от device_key браузера
+    tokens_revoked_at DATETIME(6) NULL,                      -- JWT, выданные раньше, недействительны
     PRIMARY KEY (id),
     KEY ix_devices_user_id (user_id),
     CONSTRAINT fk_devices_user_id FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE

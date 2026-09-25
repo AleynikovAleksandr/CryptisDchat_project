@@ -48,7 +48,12 @@ class UserWallet(Base):
 
 
 class Device(Base):
-    """Устройство/сессия подключения. К нему привязан refresh-токен."""
+    """Устройство (браузер) пользователя. К нему привязан refresh-токен.
+
+    Сервер выдаёт браузеру ключ устройства в HttpOnly-cookie (новый при каждом входе);
+    повторный вход с ним переиспользует запись, а не создаёт новое устройство.
+    В БД лежит только SHA-256 ключа.
+    """
 
     __tablename__ = "devices"
     __table_args__ = (Index("ix_devices_user_id", "user_id"),)
@@ -61,6 +66,10 @@ class Device(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # при повторном входе на отозванное устройство revoked_at сбрасывается, а отметка
+    # переезжает сюда: JWT, выданные до отзыва, так и остаются недействительными
+    tokens_revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class RefreshToken(Base):
