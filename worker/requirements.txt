@@ -1,0 +1,2 @@
+# Celery worker / beat: тот же код моделей и сервисов, что у backend (образ копирует backend/)
+-r ../backend/requirements.txt

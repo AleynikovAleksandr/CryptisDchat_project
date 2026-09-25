@@ -1,0 +1,215 @@
+services:
+  db:
+    image: mariadb:11.4
+    container_name: cryptis_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${DB_NAME:-cryptisdchat}
+      MYSQL_USER: ${DB_USER:-cryptis_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./backend/database/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    command: >
+      --innodb-buffer-pool-size=2G
+      --innodb-log-file-size=512M
+      --innodb-flush-log-at-trx-commit=2
+      --max-connections=500
+      --innodb-read-io-threads=8
+      --innodb-write-io-threads=8
+      --max-allowed-packet=64M
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 180s
+    networks:
+      - cryptis_network
+
+  redis:
+    image: redis/redis-stack:latest
+    container_name: redis_stack_master
+    restart: unless-stopped
+    ports:
+      - "6390:6379"
+      - "8096:8001"
+    volumes:
+      - ./data_warehouses/redis:/data
+    environment:
+      REDIS_ARGS: "--appendonly yes --appendfsync everysec --maxmemory-policy noeviction"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - cryptis_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: cryptis_backend
+    restart: unless-stopped
+    user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
+    env_file: .env
+    volumes:
+      - ./logs/gunicorn:/app/data_warehouses/gunicorn
+      - ./data_warehouses/uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: gunicorn -c gunicorn.conf.py app.main:app
+    ports:
+      - "3890:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - cryptis_network
+
+  admin:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: cryptis_admin
+    restart: unless-stopped
+    user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: gunicorn -c gunicorn_admin.conf.py admin_app.wsgi:app
+    ports:
+      - "3891:8001"
+    networks:
+      - cryptis_network
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    restart: always
+    user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
+    env_file:
+      - .env
+      - worker.env
+      - realm.env
+    volumes:
+      - ./data_warehouses/uploads:/app/uploads
+      - ./logs/celery:/app/data_warehouses/celery
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A worker.celery_app worker -Q blockchain,keys --concurrency=2 -n critical@%h
+      --loglevel=info --logfile=/app/data_warehouses/celery/celery.log
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A worker.celery_app inspect ping -d critical@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - cryptis_network
+      - keys_network
+
+  worker_fast:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    restart: always
+    user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
+    env_file: .env
+    volumes:
+      - ./data_warehouses/uploads:/app/uploads
+      - ./logs/celery:/app/data_warehouses/celery
+      - ./data_warehouses/backups:/app/data_warehouses/backups
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A worker.celery_app worker -Q notifications,media,maintenance --concurrency=4 -n fast@%h
+      --loglevel=info --logfile=/app/data_warehouses/celery/celery-fast.log
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A worker.celery_app inspect ping -d fast@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - cryptis_network
+
+  beat:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    restart: always
+    user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
+    env_file: .env
+    volumes:
+      - ./logs/celery:/app/data_warehouses/celery
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A worker.celery_app beat --loglevel=info
+      --schedule=/app/data_warehouses/celery/celerybeat-schedule
+      --logfile=/app/data_warehouses/celery/beat.log
+    networks:
+      - cryptis_network
+
+  realm1:
+    build: { context: ., dockerfile: realm/Dockerfile }
+    restart: unless-stopped
+    env_file: realm.env
+    environment: { REALM_ID: realm1 }
+    volumes: [realm1_data:/data]
+    networks: [keys_network]
+
+  realm2:
+    build: { context: ., dockerfile: realm/Dockerfile }
+    restart: unless-stopped
+    env_file: realm.env
+    environment: { REALM_ID: realm2 }
+    volumes: [realm2_data:/data]
+    networks: [keys_network]
+
+  realm3:
+    build: { context: ., dockerfile: realm/Dockerfile }
+    restart: unless-stopped
+    env_file: realm.env
+    environment: { REALM_ID: realm3 }
+    volumes: [realm3_data:/data]
+    networks: [keys_network]
+
+volumes:
+  mariadb_data:
+  realm1_data:
+  realm2_data:
+  realm3_data:
+
+networks:
+  cryptis_network:
+    driver: bridge
+  keys_network:
+    driver: bridge
+    internal: true

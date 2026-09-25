@@ -1,0 +1,23 @@
+{% extends "admin/base.html" %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+<h1>Reports</h1>
+<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+  {% for s in ['open', 'in_review', 'resolved', 'rejected', 'all'] %}
+  <a class="pill {{ 'ok' if s == status }}" href="{{ url_for('admin.reports', status=s) }}">{{ s.replace('_', ' ') }}</a>
+  {% endfor %}
+</div>
+<div class="table-wrap"><table>
+  <tr><th>Created</th><th>Reason</th><th>Reporter</th><th>Target</th><th>Status</th></tr>
+  {% for r in reports %}
+  <tr>
+    <td class="mono"><a href="{{ url_for('admin.report_detail', id=r.id) }}">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</a></td>
+    <td>{{ r.reason }}</td>
+    <td class="mono"><a href="{{ url_for('admin.user_detail', uuid=r.reporter_id) }}">{{ r.reporter_id[:8] }}…</a></td>
+    <td class="mono">{% if r.target_user_id %}<a href="{{ url_for('admin.user_detail', uuid=r.target_user_id) }}">user {{ r.target_user_id[:8] }}…</a>
+        {% elif r.thread_id %}thread {{ r.thread_id[:8] }}…{% else %}message {{ (r.message_id or '')[:8] }}…{% endif %}</td>
+    <td><span class="pill {{ 'warn' if r.status in ('open', 'in_review') else 'ok' }}">{{ r.status }}</span></td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="muted">No reports.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

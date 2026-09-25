@@ -1,0 +1,13 @@
+{% extends "admin/base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<div style="max-width:380px;margin:12vh auto 0;" class="card">
+  <h1 style="text-align:center;">CryptisDchat Admin</h1>
+  <form method="post" style="display:flex;flex-direction:column;gap:12px;">
+    {{ form.hidden_tag() }}
+    <label>{{ form.username.label }} {{ form.username(autocomplete="username", autofocus=true) }}</label>
+    <label>{{ form.password.label }} {{ form.password(autocomplete="current-password") }}</label>
+    <button type="submit" class="primary">Sign in</button>
+  </form>
+</div>
+{% endblock %}

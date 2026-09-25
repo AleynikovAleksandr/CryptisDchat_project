@@ -1,0 +1,31 @@
+{% extends "admin/base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<div class="grid">
+  <div class="card"><div class="muted">Users</div><div class="stat">{{ m.users_total }}</div>
+    <div class="muted">{{ m.users_suspended }} suspended</div></div>
+  <div class="card"><div class="muted">Messages, 24h</div><div class="stat">{{ m.messages_24h }}</div>
+    <div class="muted">{{ m.threads_total }} conversations</div></div>
+  <div class="card"><div class="muted">Hashes waiting for batch</div><div class="stat">{{ m.chain_events_queued }}</div>
+    <div class="muted">Redis queue: {{ m.chain_pending_redis }}</div></div>
+  <div class="card"><div class="muted">TON batches</div><div class="stat">{{ m.batches.confirmed }}</div>
+    <div class="muted">{{ m.batches.submitted }} submitted · {{ m.batches.pending }} pending ·
+      <span style="color:{{ '#c4121e' if m.batches.failed else 'inherit' }}">{{ m.batches.failed }} failed</span></div></div>
+  <div class="card"><div class="muted">Open reports</div><div class="stat">{{ m.open_reports }}</div>
+    <div class="muted"><a href="{{ url_for('admin.reports') }}">Review →</a></div></div>
+</div>
+
+<h2>Recent admin actions</h2>
+<div class="table-wrap">
+<table>
+  <tr><th>Time (UTC)</th><th>Admin</th><th>Action</th><th>Target</th><th>IP</th></tr>
+  {% for a in audit_log %}
+  <tr><td class="mono">{{ a.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td><td>{{ a.admin_id or '—' }}</td>
+      <td>{{ a.action }}</td><td class="mono">{{ a.target_type }} {{ a.target_id }}</td><td class="mono">{{ a.ip_address }}</td></tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">No actions yet.</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

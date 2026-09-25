@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CryptisDchat</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  a { color: #0066cc; }
+  a:hover { color: #0071e3; }
+
+  #submit-btn:hover {
+    background: #1f2228;
+  }
+</style>
+</head>
+<body>
+
+<div style="min-height:100vh;width:100%;position:relative;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;overflow:hidden;padding:16px;">
+  <img src="/static/images/login-bg.jpg" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;">
+  <div style="position: absolute; inset: 0; z-index: 1; background: rgba(252,252,252,0.75); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); border: 1px solid rgba(240,240,240,0.8); box-shadow: 0px 1px 40px 10px rgba(0,0,0,0.08); left: -4px; top: -6px"></div>
+
+  <form id="login-form" style="position: relative; z-index: 2; width: 100%; max-width: 420px; padding: clamp(28px, 6vw, 40px) clamp(22px, 6vw, 36px) 20px; display: flex; flex-direction: column; gap: 20px; background: rgba(252,252,252,0.75); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(240,240,240,0.8); border-radius: 20px; box-shadow: 0 4px 30px rgba(0,0,0,0.08); box-sizing: border-box;">
+
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;margin-bottom:4px;">
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="#0a0a0a">
+          <path d="M12.001 1.5c5.858 0 10.7 4.518 10.7 10.2-.001 5.683-4.842 10.2-10.7 10.2-1.785 0-2.96-.555-3.95-1.095-1.876.768-4.02 1.2-6.245-.075l-.885-.505.523-.875c.54-.904.77-1.581.849-2.118.077-.526.02-.98-.11-1.463-.066-.25-.15-.502-.247-.788-.095-.277-.204-.59-.301-.92-.2-.674-.36-1.449-.332-2.39C1.319 6.002 6.153 1.5 12 1.5z"></path>
+        </svg>
+        <h1 style="margin: 0; font-family: -apple-system, sans-serif; font-size: 25px; font-weight: 500; line-height: 28px; letter-spacing: -0.5px; color: #0a0a0a">CryptisDchat</h1>
+      </div>
+      <p style="margin:0;font-family:-apple-system,sans-serif;font-size:13px;font-weight:400;line-height:21.125px;letter-spacing:normal;color:#7d8187;">Sign in with your TON wallet</p>
+    </div>
+
+    <div style="min-height:16px;">
+      <p id="login-error" style="display:none;margin:0;text-align:center;font-size:12px;font-weight:400;line-height:16px;letter-spacing:-0.12px;color:#ff3b30;">Couldn't connect. Please try again.</p>
+    </div>
+
+    <button type="submit" id="submit-btn" style="height: 48px; width: 100%; align-self: center; margin-top: 8px; border: none; border-radius: 99px; background: #0a0a0a; color: #ffffff; font-family: -apple-system, sans-serif; font-size: 15px; font-weight: 500; letter-spacing: normal; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: background 0.2s ease;">Connect TON Wallet</button>
+
+  </form>
+</div>
+
+<script src="/static/js/vendor/nacl-fast.min.js"></script>
+<script src="/static/js/lib/crypto.js"></script>
+<script src="/static/js/lib/vault.js"></script>
+<script src="/static/js/login.js"></script>
+
+</body>
+</html>

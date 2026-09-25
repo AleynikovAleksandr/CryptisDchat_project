@@ -1,0 +1,15 @@
+# Общие зависимости проекта для локальной разработки и тестов (боевые образы — backend/, worker/, realm/)
+-r backend/requirements.txt
+-r realm/requirements.txt
+
+# тесты
+pytest==9.1.1
+pytest-asyncio==1.4.0
+aiosqlite==0.22.1          # SQLite вместо MariaDB в тестах
+fakeredis==2.38.0          # Redis в памяти для тестов
+grpcio-tools==1.84.0       # сверка кодека с официальным protobuf
+
+# локальный запуск без Docker (scripts/dev_server.py) и браузерные E2E
+redislite==6.2.912183      # настоящий redis-server внутри venv
+lupa==2.8
+playwright==1.63.0

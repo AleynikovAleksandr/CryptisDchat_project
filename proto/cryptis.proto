@@ -1,0 +1,43 @@
+// CryptisDchat — бинарный формат транспортного уровня (ТЗ 6.2, 6.4).
+//
+// Эталонная схема. Сервер (backend/app/proto/wire.py) и браузер
+// (backend/static/js/lib/proto.js) используют компактный кодек wire-формата
+// protobuf по этой схеме; совместимость с официальной реализацией protobuf
+// проверяет tests/test_proto_wire.py.
+syntax = "proto3";
+
+package cryptis.v1;
+
+// Зашифрованный пакет сообщения. Всё содержимое (текст с Markdown, имя файла,
+// цитата) — внутри ciphertext; сервер видит только непрозрачные байты.
+message MessagePacket {
+  string client_msg_id      = 1;   // UUID, идемпотентность повторной отправки
+  string thread_id          = 2;
+  uint32 key_epoch          = 3;   // эпоха Conversation key
+  uint32 sender_key_version = 4;   // версия Signing-ключа отправителя
+  bytes  nonce              = 5;   // 24 байта, XSalsa20-Poly1305
+  bytes  ciphertext         = 6;   // secretbox(conversation_key, nonce, plaintext)
+  bytes  signature          = 7;   // ECDSA P-256 / SHA-256, r||s (64 байта)
+  string kind               = 8;   // text | file
+  string reply_to_id        = 9;
+  string attachment_id      = 10;
+  repeated string search_tokens = 11;  // слепой индекс: HMAC(search_key, префикс слова)
+  string push_preview       = 12;  // безопасный фрагмент для push (ТЗ 5); не сохраняется
+  string forwarded_from_id  = 13;
+}
+
+// Кадр постоянного WebSocket-соединения.
+//   клиент → сервер: auth, heartbeat, typing.start, typing.stop, ack.delivered
+//   сервер → клиент: ready, message.new, message.delivered, message.read,
+//                    message.confirmed, thread.updated, typing.start, typing.stop,
+//                    key.rotation, session.revoked, error
+message WsFrame {
+  string        event      = 1;
+  string        thread_id  = 2;
+  string        message_id = 3;
+  uint64        seq        = 4;
+  string        sender_id  = 5;
+  uint64        ts         = 6;    // unix-время, мс
+  MessagePacket packet     = 7;    // для message.new
+  string        json       = 8;    // прочие поля события (JSON)
+}

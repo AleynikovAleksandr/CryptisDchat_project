@@ -1,0 +1,27 @@
+{% extends "admin/base.html" %}
+{% block title %}Report{% endblock %}
+{% block content %}
+<h1>Report <span class="pill">{{ report.status }}</span></h1>
+<div class="row">
+  <div class="card">
+    <div class="muted">Reason</div><div><b>{{ report.reason }}</b></div>
+    <div class="muted" style="margin-top:8px;">Details</div><div style="white-space:pre-wrap;">{{ report.details or '—' }}</div>
+    <div class="muted" style="margin-top:8px;">Reporter</div>
+    <div class="mono"><a href="{{ url_for('admin.user_detail', uuid=report.reporter_id) }}">{{ report.reporter_id }}</a></div>
+    {% if report.target_user_id %}<div class="muted" style="margin-top:8px;">Reported user</div>
+    <div class="mono"><a href="{{ url_for('admin.user_detail', uuid=report.target_user_id) }}">{{ report.target_user_id }}</a></div>{% endif %}
+    {% if report.thread_id %}<div class="muted" style="margin-top:8px;">Thread</div><div class="mono">{{ report.thread_id }}</div>{% endif %}
+    {% if report.message_id %}<div class="muted" style="margin-top:8px;">Message</div><div class="mono">{{ report.message_id }}</div>{% endif %}
+    <p class="muted" style="margin-top:14px;">Message content is end-to-end encrypted: the server cannot show it.
+      Moderation relies on the reporter's description and account-level actions.</p>
+  </div>
+  <div class="card">
+    <form method="post" style="display:flex;flex-direction:column;gap:10px;">
+      {{ form.hidden_tag() }}
+      <label>{{ form.status.label }} {{ form.status() }}</label>
+      <label>{{ form.resolution_note.label }} {{ form.resolution_note(rows=5) }}</label>
+      <button type="submit" class="primary">Save</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Admin{% endblock %} · CryptisDchat</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         color: #0f1419; background: hsl(200 19% 98%); }
+  a { color: hsl(204 88% 45%); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { display: flex; align-items: center; gap: 22px; padding: 12px 24px; background: #fff;
+           border-bottom: 1px solid hsl(200 19% 90%); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+  header .brand { font-weight: 800; font-size: 17px; display: flex; gap: 8px; align-items: center; }
+  header nav { display: flex; gap: 16px; flex: 1; flex-wrap: wrap; }
+  header nav a { color: #536471; font-weight: 600; }
+  header nav a.on { color: #0f1419; }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 22px; margin: 0 0 16px; }
+  h2 { font-size: 16px; margin: 26px 0 10px; }
+  .card { background: #fff; border: 1px solid hsl(200 19% 90%); border-radius: 14px; padding: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+  .stat { font-size: 26px; font-weight: 800; }
+  .muted { color: #536471; }
+  .table-wrap { overflow-x: auto; background: #fff; border: 1px solid hsl(200 19% 90%); border-radius: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid hsl(200 19% 94%); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #536471; }
+  tr:last-child td { border-bottom: 0; }
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 700;
+          background: hsl(200 19% 93%); }
+  .pill.ok { background: hsl(145 55% 90%); color: hsl(145 60% 25%); }
+  .pill.warn { background: hsl(40 90% 88%); color: hsl(30 70% 30%); }
+  .pill.bad { background: hsl(4 88% 93%); color: #c4121e; }
+  button, .btn { height: 34px; padding: 0 16px; border-radius: 999px; border: 1px solid hsl(200 19% 85%);
+                 background: #fff; font-weight: 700; cursor: pointer; font: inherit; font-weight: 700; }
+  button.primary { background: hsl(204 88% 53%); color: #fff; border: 0; }
+  button.danger { background: #f4212e; color: #fff; border: 0; }
+  input[type=text], input[type=password], select, textarea {
+    font: inherit; padding: 8px 12px; border: 1px solid hsl(200 19% 84%); border-radius: 10px; width: 100%; }
+  form.inline { display: inline-flex; gap: 8px; align-items: center; }
+  .flash { padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-weight: 600; }
+  .flash.ok { background: hsl(145 55% 92%); } .flash.error { background: hsl(4 88% 95%); color: #c4121e; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+  .row > .card { flex: 1 1 320px; }
+</style>
+</head>
+<body>
+{% if session.get('admin_id') and logout_form is defined %}
+<header>
+  <div class="brand">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="#0a0a0a"><path d="M12.001 1.5c5.858 0 10.7 4.518 10.7 10.2-.001 5.683-4.842 10.2-10.7 10.2-1.785 0-2.96-.555-3.95-1.095-1.876.768-4.02 1.2-6.245-.075l-.885-.505.523-.875c.54-.904.77-1.581.849-2.118.077-.526.02-.98-.11-1.463-.066-.25-.15-.502-.247-.788-.095-.277-.204-.59-.301-.92-.2-.674-.36-1.449-.332-2.39C1.319 6.002 6.153 1.5 12 1.5z"/></svg>
+    CryptisDchat Admin
+  </div>
+  <nav>
+    <a href="{{ url_for('admin.dashboard') }}" class="{{ 'on' if request.endpoint == 'admin.dashboard' }}">Dashboard</a>
+    <a href="{{ url_for('admin.users') }}" class="{{ 'on' if request.endpoint in ('admin.users', 'admin.user_detail') }}">Users</a>
+    <a href="{{ url_for('admin.reports') }}" class="{{ 'on' if request.endpoint in ('admin.reports', 'admin.report_detail') }}">Reports</a>
+    <a href="{{ url_for('admin.blockchain_queue') }}" class="{{ 'on' if request.endpoint == 'admin.blockchain_queue' }}">Blockchain queue</a>
+    <a href="{{ url_for('admin.metrics') }}">Metrics</a>
+  </nav>
+  <form method="post" action="{{ url_for('admin.logout') }}" class="inline">
+    {{ logout_form.hidden_tag() }}<button type="submit">Log out</button>
+  </form>
+</header>
+{% endif %}
+<main>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

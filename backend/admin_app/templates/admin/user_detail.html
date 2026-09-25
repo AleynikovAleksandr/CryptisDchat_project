@@ -1,0 +1,64 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ user.display_name }}{% endblock %}
+{% block content %}
+<h1>{{ user.display_name or 'User' }} {% if user.is_suspended %}<span class="pill bad">suspended</span>{% endif %}</h1>
+<div class="row">
+  <div class="card">
+    <div class="muted">UUID</div><div class="mono">{{ user.id }}</div>
+    <div class="muted" style="margin-top:8px;">Username</div><div>{{ '@' ~ user.username if user.username else '—' }}</div>
+    <div class="muted" style="margin-top:8px;">Created</div><div class="mono">{{ user.created_at }}</div>
+    <div class="muted" style="margin-top:8px;">Sessions revoked at</div><div class="mono">{{ user.sessions_revoked_at or '—' }}</div>
+    {% if user.is_suspended %}<div class="muted" style="margin-top:8px;">Reason</div><div>{{ user.suspended_reason }}</div>{% endif %}
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0;">Actions</h2>
+    <form method="post" action="{{ url_for('admin.revoke_sessions', uuid=user.id) }}" style="margin-bottom:12px;">
+      {{ action_form.hidden_tag() }}
+      <button type="submit">Revoke all sessions</button>
+      <div class="muted" style="margin-top:4px;">Deletes every refresh token; open sessions receive <code>session.revoked</code>.</div>
+    </form>
+    {% if user.is_suspended %}
+    <form method="post" action="{{ url_for('admin.unsuspend', uuid=user.id) }}">
+      {{ action_form.hidden_tag() }}<button type="submit" class="primary">Restore account</button>
+    </form>
+    {% else %}
+    <form method="post" action="{{ url_for('admin.suspend', uuid=user.id) }}" style="display:flex;gap:8px;">
+      {{ suspend_form.hidden_tag() }}
+      {{ suspend_form.reason(placeholder="Reason for suspension") }}
+      <button type="submit" class="danger">Suspend</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<h2>TON wallets</h2>
+<div class="table-wrap"><table>
+  <tr><th>Address</th><th>Raw</th><th>Network</th><th>Primary</th><th>Linked</th></tr>
+  {% for w in wallets %}
+  <tr><td class="mono">{{ w.friendly_address }}</td><td class="mono">{{ w.address }}</td><td>{{ w.network }}</td>
+      <td>{{ 'yes' if w.is_primary else '' }}</td><td class="mono">{{ w.linked_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+  {% endfor %}
+</table></div>
+
+<h2>Devices</h2>
+<div class="table-wrap"><table>
+  <tr><th>Device</th><th>IP</th><th>Created</th><th>Last seen</th><th>Status</th></tr>
+  {% for d in devices %}
+  <tr><td><b>{{ d.name }}</b><div class="muted">{{ d.user_agent[:90] }}</div></td><td class="mono">{{ d.ip_address }}</td>
+      <td class="mono">{{ d.created_at.strftime('%Y-%m-%d %H:%M') }}</td><td class="mono">{{ d.last_seen_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{% if d.revoked_at %}<span class="pill">revoked</span>{% else %}<span class="pill ok">active</span>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">No devices.</td></tr>{% endfor %}
+</table></div>
+
+<h2>Refresh tokens</h2>
+<div class="table-wrap"><table>
+  <tr><th>Token id</th><th>Device</th><th>Created</th><th>Expires</th><th>Status</th></tr>
+  {% for t in tokens %}
+  <tr><td class="mono">{{ t.id }}</td><td class="mono">{{ t.device_id[:8] }}…</td>
+      <td class="mono">{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}</td><td class="mono">{{ t.expires_at.strftime('%Y-%m-%d') }}</td>
+      <td>{% if t.revoked_at %}<span class="pill">{{ 'rotated' if t.replaced_by_id else 'revoked' }}</span>
+          {% elif t.expires_at < now %}<span class="pill warn">expired</span>
+          {% else %}<span class="pill ok">active</span>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">No tokens.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

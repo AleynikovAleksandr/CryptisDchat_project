@@ -1,0 +1,54 @@
+{% extends "admin/base.html" %}
+{% block title %}Blockchain queue{% endblock %}
+{% block content %}
+<h1>TON write queue</h1>
+<p class="muted">Message hashes are batched into a Merkle tree; one transaction from the service wallet anchors each root.
+  Failed batches stop auto-retrying after 5 attempts and wait for a manual retry here.</p>
+<div class="grid" style="margin-bottom:8px;">
+  <div class="card"><div class="muted">Waiting for batch</div><div class="stat">{{ m.chain_events_queued }}</div></div>
+  <div class="card"><div class="muted">Pending</div><div class="stat">{{ m.batches.pending }}</div></div>
+  <div class="card"><div class="muted">Submitted</div><div class="stat">{{ m.batches.submitted }}</div></div>
+  <div class="card"><div class="muted">Failed</div><div class="stat" style="color:{{ '#c4121e' if m.batches.failed else 'inherit' }}">{{ m.batches.failed }}</div></div>
+</div>
+
+<h2>Batches in progress</h2>
+<div class="table-wrap"><table>
+  <tr><th>Created</th><th>Merkle root</th><th>Leaves</th><th>Status</th><th>Attempts</th><th>Last error</th><th></th></tr>
+  {% for b in batches %}
+  <tr>
+    <td class="mono">{{ b.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+    <td class="mono">{{ b.merkle_root[:20] }}…</td><td>{{ b.leaf_count }}</td>
+    <td><span class="pill {{ 'bad' if b.status == 'failed' else 'warn' }}">{{ b.status }}</span></td>
+    <td>{{ b.attempts }}</td><td class="mono" style="max-width:320px;">{{ (b.last_error or '')[:200] }}</td>
+    <td>{% if b.status == 'failed' %}
+      <form method="post" action="{{ url_for('admin.retry_batch', batch_id=b.id) }}">{{ action_form.hidden_tag() }}
+        <button type="submit" class="primary">Retry</button></form>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="7" class="muted">Queue is empty.</td></tr>{% endfor %}
+</table></div>
+
+<h2>Group membership transactions</h2>
+<div class="table-wrap"><table>
+  <tr><th>Created</th><th>Group</th><th>Action</th><th>Chain</th><th>Key rotation</th><th>Error</th><th></th></tr>
+  {% for e in membership %}
+  <tr>
+    <td class="mono">{{ e.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td><td class="mono">{{ e.thread_id[:8] }}…</td>
+    <td>{{ e.action }}</td>
+    <td><span class="pill {{ 'bad' if e.chain_status == 'failed' else 'warn' }}">{{ e.chain_status }}</span></td>
+    <td>{{ e.rotation_status }}</td><td class="mono">{{ (e.last_error or '')[:160] }}</td>
+    <td>{% if e.chain_status == 'failed' %}
+      <form method="post" action="{{ url_for('admin.retry_membership', event_id=e.id) }}">{{ action_form.hidden_tag() }}
+        <button type="submit" class="primary">Retry</button></form>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="7" class="muted">Nothing pending.</td></tr>{% endfor %}
+</table></div>
+
+<h2>Recently confirmed</h2>
+<div class="table-wrap"><table>
+  <tr><th>Confirmed</th><th>Merkle root</th><th>Leaves</th><th>Transaction</th></tr>
+  {% for b in confirmed %}
+  <tr><td class="mono">{{ b.confirmed_at.strftime('%Y-%m-%d %H:%M:%S') if b.confirmed_at }}</td>
+      <td class="mono">{{ b.merkle_root[:20] }}…</td><td>{{ b.leaf_count }}</td><td class="mono">{{ (b.tx_hash or '')[:48] }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">None yet.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>CryptisDchat</title>
+<link rel="stylesheet" href="/static/css/cryptis.css">
+</head>
+
+<body>
+<!-- ============================================================
+     РАЗМЕТКА
+     ============================================================ -->
+<div class="app">
+  <div class="app-row">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main id="main" class="main"></main>
+  </div>
+</div>
+
+<!-- окна поверх страницы -->
+<div id="overlays"></div>
+
+<!-- скрытые поля выбора файлов -->
+<input id="dc-file-input" type="file" multiple hidden>
+<input id="dc-avatar-input" type="file" accept="image/*" hidden>
+<input id="dc-group-photo" type="file" accept="image/*" hidden>
+
+<!-- ============================================================
+     СКРИПТ
+     ============================================================ -->
+<!-- ============================================================
+     СКРИПТЫ: криптография и транспорт → ядро → данные → обработчики → экраны → движок
+     ============================================================ -->
+<script src="/static/js/vendor/nacl-fast.min.js"></script>
+<script src="/static/js/lib/proto.js"></script>
+<script src="/static/js/lib/crypto.js"></script>
+<script src="/static/js/lib/vault.js"></script>
+<script src="/static/js/lib/api.js"></script>
+<script src="/static/js/lib/ws.js"></script>
+<script src="/static/js/lib/markdown.js"></script>
+<script src="/static/js/lib/treekem.js"></script>
+<script src="/static/js/app/core.js"></script>
+<script src="/static/js/app/icons.js"></script>
+<script src="/static/js/app/data.js"></script>
+<script src="/static/js/app/handlers.js"></script>
+<script src="/static/js/app/views.js"></script>
+<script src="/static/js/app/engine.js"></script>
+</body>
+</html>
