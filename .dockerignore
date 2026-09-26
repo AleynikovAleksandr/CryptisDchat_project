@@ -1,0 +1,13 @@
+# В контекст сборки образов не попадают окружение, секреты, данные и тесты
+.venv/
+.git/
+.env
+worker.env
+realm.env
+data_warehouses/
+logs/
+tests/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.DS_Store

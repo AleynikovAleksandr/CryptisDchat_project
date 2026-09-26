@@ -1,0 +1,48 @@
+# Автоопределение текстовых файлов + LF в репозитории
+* text=auto eol=lf
+
+# Принудительный CRLF только для Windows-скриптов
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+# Git LFS — все большие и бинарные файлы
+*.zip       filter=lfs diff=lfs merge=lfs -text
+*.rar       filter=lfs diff=lfs merge=lfs -text
+*.7z        filter=lfs diff=lfs merge=lfs -text
+*.tar.gz    filter=lfs diff=lfs merge=lfs -text
+*.tar       filter=lfs diff=lfs merge=lfs -text
+*.png       filter=lfs diff=lfs merge=lfs -text
+*.jpg       filter=lfs diff=lfs merge=lfs -text
+*.jpeg      filter=lfs diff=lfs merge=lfs -text
+*.gif       filter=lfs diff=lfs merge=lfs -text
+*.webp      filter=lfs diff=lfs merge=lfs -text
+*.pdf       filter=lfs diff=lfs merge=lfs -text
+*.pt        filter=lfs diff=lfs merge=lfs -text
+*.pth       filter=lfs diff=lfs merge=lfs -text
+*.pkl       filter=lfs diff=lfs merge=lfs -text
+*.pickle    filter=lfs diff=lfs merge=lfs -text
+*.bin       filter=lfs diff=lfs merge=lfs -text
+*.safetensors filter=lfs diff=lfs merge=lfs -text
+*.onnx      filter=lfs diff=lfs merge=lfs -text
+*.h5        filter=lfs diff=lfs merge=lfs -text
+*.tflite    filter=lfs diff=lfs merge=lfs -text
+*.joblib    filter=lfs diff=lfs merge=lfs -text
+# GitHub Linguist — правильная статистика языков
+node_modules/       linguist-vendored
+venv/               linguist-vendored
+env/                linguist-vendored
+.venv/              linguist-vendored
+__pycache__/        linguist-vendored
+*.pyc               linguist-generated
+instance/           linguist-vendored
+*.sqlite3           linguist-vendored
+dist/               linguist-generated
+build/              linguist-generated
+*.log               linguist-generated
+*.md                linguist-documentation
+# Не включать в git archive (релизы)
+.env                export-ignore
+.env.example        export-ignore
+.gitignore          export-ignore
+.gitattributes      export-ignore
+*.zip filter=lfs diff=lfs merge=lfs -text

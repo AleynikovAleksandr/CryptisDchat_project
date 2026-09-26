@@ -1,0 +1,22 @@
+# окружение и секреты
+.venv/
+worker.env
+realm.env
+
+# данные и логи (структура каталогов сохраняется через .gitkeep)
+data_warehouses/*
+!data_warehouses/.gitkeep
+logs/**/*.log
+celerybeat-schedule*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ОС и редакторы
+.DS_Store
+.idea/
+.vscode/
