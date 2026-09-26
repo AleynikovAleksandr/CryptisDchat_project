@@ -6,7 +6,7 @@
 #   scripts/run_gunicorn.sh logs [svc] # логи (например: logs backend)
 #   scripts/run_gunicorn.sh down       # остановить (данные в томах сохраняются)
 #
-# Что делает `up` — создаёт и запускает все 10 контейнеров:
+# Что делает `up` — создаёт и запускает все 11 контейнеров:
 #   1. проверяет, что есть .env, worker.env, realm.env (их нужно заполнить заранее);
 #   2. создаёт каталоги logs/ и data_warehouses/ — их монтируют контейнеры;
 #   3. этап 1 — инфраструктура: db (MariaDB), redis, realm1..3; ждёт, пока db и redis станут healthy
@@ -14,8 +14,9 @@
 #   4. этап 2 — приложение:
 #        backend — Gunicorn + UvicornWorker: FastAPI, WebSocket, Login.html/cryptis.html  (:3890)
 #        admin   — Gunicorn + gthread: Flask-админка и вебхуки                             (:3891)
+#        caddy   — HTTPS с самоподписанным сертификатом: приложение :3443, админка :3444
 #        worker, worker_fast, beat — Celery;
-#   5. ждёт, пока backend ответит на /healthz, и проверяет, что работают ВСЕ 10 контейнеров —
+#   5. ждёт, пока backend ответит на /healthz, и проверяет, что работают ВСЕ 11 контейнеров —
 #      если какой-то упал, показывает его логи;
 #   6. создаёт администратора Flask-панели из ADMIN_USERNAME / ADMIN_PASSWORD в .env.
 #
@@ -30,7 +31,7 @@ say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31mошибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
 INFRA=(db redis realm1 realm2 realm3)
-APP=(backend admin worker worker_fast beat)
+APP=(backend admin caddy worker worker_fast beat)
 ALL=("${INFRA[@]}" "${APP[@]}")
 
 # владелец файлов в смонтированных каталогах — тот, кто запускает скрипт (подставляется в compose)
@@ -112,11 +113,16 @@ up() {
   say "создание администратора Flask-панели…"
   compose exec -T admin python database/initial_data.py
 
+  local https_host app_port admin_port
+  https_host="$(env_value HTTPS_HOST || true)"
+  app_port="$(env_value HTTPS_APP_PORT || true)"; app_port="${app_port:-3443}"
+  admin_port="$(env_value HTTPS_ADMIN_PORT || true)"; admin_port="${admin_port:-3444}"
+
   cat <<EOF
 
   CryptisDchat запущен — все ${#ALL[@]} контейнеров работают
-  ─ приложение:  http://localhost:3890
-  ─ админка:     http://localhost:3891/admin/   логин: $(env_value ADMIN_USERNAME)   пароль: $(env_value ADMIN_PASSWORD)
+  ─ приложение:  https://${https_host}:${app_port}   (или http://localhost:3890 через SSH/VS Code)
+  ─ админка:     https://${https_host}:${admin_port}/admin/   логин: $(env_value ADMIN_USERNAME)   пароль: $(env_value ADMIN_PASSWORD)
   ─ состояние:   scripts/run_gunicorn.sh status
   ─ остановка:   scripts/run_gunicorn.sh down
 

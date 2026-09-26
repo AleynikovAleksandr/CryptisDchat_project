@@ -74,7 +74,7 @@ CSS classes and re-rendering mechanics are preserved, and the demo data is repla
 - Flask admin panel: users, account suspension, session revocation, reports, blockchain queue, Prometheus metrics
 - Admin sign-in with CSRF protection and brute-force lockout; audit log of every admin action
 - HMAC-signed webhooks; rate limiting for the API and WebSocket; Origin checks
-- 10 Docker containers; Celery with 5 queues, 2 workers and beat; daily MariaDB dump
+- 11 Docker containers (incl. a Caddy HTTPS front); Celery with 5 queues, 2 workers and beat; daily MariaDB dump
 
 ---
 
@@ -87,7 +87,7 @@ scripts/run_gunicorn.sh
 ```
 
 The script checks that `.env`, `worker.env` and `realm.env` exist in the project root, builds the images
-and starts all 10 containers (`db`, `redis`, `backend`, `admin`, `worker`, `worker_fast`, `beat`,
+and starts all 11 containers (`db`, `redis`, `backend`, `admin`, `caddy`, `worker`, `worker_fast`, `beat`,
 `realm1..3`) in two stages — first `db`, `redis`, `realm1..3`, waiting until MariaDB is ready, then the
 application. Finally it checks that **every** container is running (and prints its logs if one failed),
 creates the admin-panel user and prints the URLs and password. FastAPI (`backend`) and Flask (`admin`)
@@ -96,8 +96,19 @@ Application containers run as the user who started the script (`id -u`/`id -g`),
 
 | URL | What it is |
 |---|---|
-| [http://85.95.150.8:3890/](http://85.95.150.8:3890/) | the app: sign-in (`Login.html`) → messenger (`cryptis.html`), API, WebSocket |
-| [http://85.95.150.8:3891/admin/](http://85.95.150.8:3891/admin/) | Flask admin panel (login and password are in `.env`: `ADMIN_USERNAME` / `ADMIN_PASSWORD`) |
+| [https://85.95.150.8:3443/](https://85.95.150.8:3443/) | the app: sign-in (`Login.html`) → messenger (`cryptis.html`), API, WebSocket |
+| [https://85.95.150.8:3444/admin/](https://85.95.150.8:3444/admin/) | Flask admin panel (login and password are in `.env`: `ADMIN_USERNAME` / `ADMIN_PASSWORD`) |
+| `http://localhost:3890` / `http://localhost:3891/admin/` | the same over an SSH / VS Code port forward |
+
+**HTTPS with a self-signed certificate.** Browsers enable Web Crypto (`crypto.subtle`) only over HTTPS or on
+`localhost`, so over plain `http://<IP>:3890` sign-in cannot work. The `caddy` container
+([`caddy/Caddyfile`](caddy/Caddyfile)) serves HTTPS on `HTTPS_APP_PORT` (3443 → `backend`) and
+`HTTPS_ADMIN_PORT` (3444 → `admin`) with a certificate from Caddy's own local CA for `HTTPS_HOST`
+(the server's IP or hostname, set in `.env`), valid for 180 days. The browser shows a "not secure" warning once
+per certificate — click "Advanced → Proceed". To remove the warning on your own devices, install the CA root:
+`docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./cryptis-root.crt` and add it to the
+system trust store. The CA lives in the `caddy_data` volume, so it survives restarts. For a real domain,
+replace this with a publicly trusted certificate.
 
 The current `.env` is set up for a local run (sign-in with the dev wallet). For a production server change
 4 lines in `.env`: `APP_ENV=production`, `DEV_WALLET_LOGIN=false`, and set `PUBLIC_ORIGIN` /

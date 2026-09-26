@@ -181,8 +181,16 @@
     });
   }
 
+  // Web Crypto (crypto.subtle) браузер даёт только на HTTPS и localhost: по http://IP шифрование недоступно
+  const INSECURE = !window.isSecureContext || !(window.crypto && window.crypto.subtle);
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (INSECURE) {
+      errorEl.textContent = 'Open the app over HTTPS (or localhost): browsers disable encryption on plain HTTP.';
+      errorEl.style.display = 'block';
+      return;
+    }
     waiting();
     try {
       const ch = await challenge();

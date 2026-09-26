@@ -55,6 +55,11 @@ def test_lockout_after_failed_attempts(admin_client):
     assert r.status_code == 429
 
 
+def test_root_redirects_to_panel(admin_client):
+    r = admin_client.get("/")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/admin/")
+
+
 def test_pages_require_login(admin_client):
     for path in ("/admin/", "/admin/users", "/admin/reports", "/admin/blockchain-queue", "/admin/metrics"):
         assert admin_client.get(path).status_code == 302

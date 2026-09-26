@@ -1,0 +1,40 @@
+# HTTPS с самоподписанным сертификатом (внутренний CA Caddy, без Let's Encrypt и без домена).
+# Web Crypto (crypto.subtle) браузер даёт только на HTTPS или localhost, поэтому по внешнему
+# адресу приложение работает только через этот вход. Браузер предупредит «подключение не
+# защищено» — один раз согласиться, либо установить корневой сертификат (см. README).
+#
+#   :3443 → backend (приложение, API, WebSocket)      :3444 → admin (Flask-панель)
+# HTTPS_HOST — внешний IP или имя сервера (.env); localhost — для проброса портов через SSH/VS Code.
+{
+	local_certs
+	skip_install_trust
+	auto_https disable_redirects
+	# браузеры не отправляют SNI для IP-адресов — без этого Caddy не выберет сертификат
+	default_sni {$HTTPS_HOST}
+	admin off
+	# браузер запоминает согласие с предупреждением для конкретного сертификата — выпускаем его
+	# на долгий срок (по умолчанию 12 ч), иначе предупреждение возвращалось бы несколько раз в сутки
+	pki {
+		ca local {
+			intermediate_lifetime 400d
+		}
+	}
+}
+
+https://{$HTTPS_HOST}:3443, https://localhost:3443 {
+	tls {
+		issuer internal {
+			lifetime 180d
+		}
+	}
+	reverse_proxy {$APP_UPSTREAM:backend:8000}
+}
+
+https://{$HTTPS_HOST}:3444, https://localhost:3444 {
+	tls {
+		issuer internal {
+			lifetime 180d
+		}
+	}
+	reverse_proxy {$ADMIN_UPSTREAM:admin:8001}
+}

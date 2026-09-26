@@ -98,6 +98,26 @@ services:
     networks:
       - cryptis_network
 
+  # HTTPS-вход с самоподписанным сертификатом: без него браузер по http://<IP> отключает
+  # Web Crypto и вход не работает (caddy/Caddyfile). Сертификаты и CA — в томе caddy_data.
+  caddy:
+    image: caddy:2
+    container_name: cryptis_caddy
+    restart: unless-stopped
+    environment:
+      HTTPS_HOST: ${HTTPS_HOST:?set HTTPS_HOST (external IP or hostname) in .env}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - backend
+      - admin
+    ports:
+      - "${HTTPS_APP_PORT:-3443}:3443"
+      - "${HTTPS_ADMIN_PORT:-3444}:3444"
+    networks:
+      - cryptis_network
+
   worker:
     build:
       context: .
@@ -204,6 +224,7 @@ services:
 
 volumes:
   mariadb_data:
+  caddy_data:
   realm1_data:
   realm2_data:
   realm3_data:

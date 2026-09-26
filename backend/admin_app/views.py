@@ -156,6 +156,12 @@ def _metrics() -> dict:
     }
 
 
+@bp.get("/")
+def root():
+    """Корень порта админки ведёт в панель, а не в 404."""
+    return redirect(url_for("admin.dashboard"))
+
+
 @bp.get("/admin/")
 @login_required
 def dashboard():
