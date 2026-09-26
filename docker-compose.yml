@@ -9,7 +9,8 @@ services:
       MYSQL_USER: ${DB_USER:-cryptis_user}
       MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
     ports:
-      - "3306:3306"
+      # внешний порт хоста (3306 часто занят системным MySQL/MariaDB); внутри сети — всегда 3306
+      - "${DB_EXTERNAL_PORT:-3307}:3306"
     volumes:
       - mariadb_data:/var/lib/mysql
       - ./backend/database/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro

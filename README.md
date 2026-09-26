@@ -412,7 +412,7 @@ Binary `WsFrame` frames (`proto/cryptis.proto`); the first frame is `auth` with 
   "Ports_and_Database"; port `3891`.
 * **Two workers**, `worker` / `worker_fast`, instead of one — as recommended in Gunicorn_Celery.md 4.9.
 * **Three realms** in their own `internal` network; the realm key is a 0600 file (a software HSM equivalent).
-* The `db` (3306) and `redis` (6390, 8096) ports are published to the host as in "Ports_and_Database"; on a
+* The `db` (host port 3307 → container 3306, override with `DB_EXTERNAL_PORT` in `.env`) and `redis` (6390, 8096) ports are published to the host as in "Ports_and_Database"; on a
   production server they must be closed with a firewall (the document says "never exposed").
 * Database passwords come from `.env` rather than plain text in the compose file
   (the document itself pointed out that risk).
