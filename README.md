@@ -86,12 +86,17 @@ CSS classes and re-rendering mechanics are preserved, and the demo data is repla
 scripts/run_gunicorn.sh
 ```
 
+Before starting, the script validates `.env`
+(required variables, duplicated keys, leftover `change-me-*` placeholders, `PUBLIC_ORIGIN` / `ALLOWED_WS_ORIGINS` / `TON_PROOF_DOMAIN` matching
+`https://HTTPS_HOST:HTTPS_APP_PORT`) and that no other program holds the host ports, printing the exact fix.
+
 The script checks that `.env`, `worker.env` and `realm.env` exist in the project root, builds the images
 and starts all 11 containers (`db`, `redis`, `backend`, `admin`, `caddy`, `worker`, `worker_fast`, `beat`,
 `realm1..3`) in two stages — first `db`, `redis`, `realm1..3`, waiting until MariaDB is ready, then the
 application. Finally it checks that **every** container is running (and prints its logs if one failed),
 creates the admin-panel user and prints the URLs and password. FastAPI (`backend`) and Flask (`admin`)
-run under Gunicorn inside the containers. Other commands: `status`, `logs [service]`, `down`.
+run under Gunicorn inside the containers. Other commands: `check` (validate `.env` and host ports without
+starting anything), `status`, `logs [service]`, `down`.
 Application containers run as the user who started the script (`id -u`/`id -g`), not as root.
 
 | URL | What it is |
