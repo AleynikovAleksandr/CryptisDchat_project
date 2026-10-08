@@ -33,7 +33,7 @@ cd "${ROOT}"
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31mошибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
-INFRA=(db redis realm1 realm2 realm3)
+INFRA=(db redis proxysql realm1 realm2 realm3)
 APP=(backend admin caddy worker worker_fast beat)
 ALL=("${INFRA[@]}" "${APP[@]}")
 
@@ -83,6 +83,11 @@ check_env() {
     [[ -z "$v" || "$v" =~ ^[0-9]+$ ]] || problems+=("$k=$v — должен быть номером порта")
   done
   [[ -n "$(env_value REALM_API_TOKEN realm.env || true)" ]] || problems+=("REALM_API_TOKEN — пустой в realm.env")
+  # пароль попадает в строку конфигурации ProxySQL в кавычках (proxysql/proxysql.cnf.template)
+  for k in DB_USER DB_PASSWORD DB_NAME; do
+    v="$(env_value "$k" || true)"
+    [[ "$v" != *[\"\\]* ]] || problems+=("$k — не должен содержать \" или \\ (ProxySQL); сгенерируйте: openssl rand -hex 32")
+  done
   # повторы: скрипт берёт первое значение, а docker compose — последнее
   for k in $(grep -oE '^[A-Z_][A-Z0-9_]*=' .env | tr -d '=' | sort | uniq -d); do
     problems+=("$k — задана в .env несколько раз (строки $(grep -nE "^$k=" .env | cut -d: -f1 | paste -sd, -)); оставьте одну")
@@ -182,6 +187,7 @@ up() {
   say "ожидание MariaDB (первая инициализация со schema.sql — до нескольких минут)…"
   wait_healthy db 300
   wait_healthy redis 60
+  wait_healthy proxysql 90   # пул соединений к MariaDB: приложение ходит в базу только через него
 
   say "этап 2: запуск приложения (${APP[*]}) — Gunicorn в backend и admin…"
   compose up -d --build "${APP[@]}"

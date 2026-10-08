@@ -264,8 +264,14 @@ async function loadMe() {
   set({ me });
 }
 
+/* Номер правки настроек: ответ GET, запрошенный до переключения, пришёл бы позже
+   и вернул бы старое значение — такой ответ отбрасываем. */
+let settingsRev = 0;
+
 async function loadSettings() {
+  const rev = settingsRev;
   const s = await API.get('/api/settings');
+  if (rev !== settingsRev) return;
   set({
     autolock: labelOf('autolock', s.autolock), groupPerm: labelOf('groupPerm', s.group_invite_policy),
     retention: labelOf('retention', s.media_retention), markdownPreview: s.markdown_preview,
@@ -275,6 +281,7 @@ async function loadSettings() {
 }
 
 async function patchSettings(patch) {
+  settingsRev++;
   try {
     await API.patch('/api/settings', patch);
     if (startAutolock.reset) startAutolock.reset();
@@ -839,7 +846,8 @@ function onWsFrame(frame, data) {
       break;
     }
     case 'thread.updated':
-      if (data.removed_user_id === S.userId) {
+      // чат удалён (пользователь удалён из админки) или нас исключили — закрываем его
+      if (data.removed_user_id === S.userId || data.deleted) {
         if (state.activeThread === data.thread_id) state.activeThread = null;
       }
       if (data.thread_id && state.members[data.thread_id] && data.members_changed) loadMembers(data.thread_id).catch(() => {});

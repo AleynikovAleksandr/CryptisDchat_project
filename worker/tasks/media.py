@@ -51,6 +51,15 @@ def purge_by_retention() -> int:
     return total
 
 
+@celery_app.task(name="media.delete_files")
+def delete_files(paths: list[str]) -> int:
+    """Блобы пользователя, удалённого из админ-панели: записи в БД уже стёрты, остались файлы."""
+    storage = _storage()
+    for path in paths:
+        storage.delete(path)
+    return len(paths)
+
+
 @celery_app.task(name="media.delete_all_for_user")
 def delete_all_for_user(user_id: str) -> int:
     """«Delete all media» (/api/settings/delete-media)."""

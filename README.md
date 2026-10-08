@@ -71,10 +71,12 @@ CSS classes and re-rendering mechanics are preserved, and the demo data is repla
 - Media auto-deletion (30 / 60 days, 6 months) and "Delete all media"
 
 **Administration and infrastructure**
-- Flask admin panel: users, account suspension, session revocation, reports, blockchain queue, Prometheus metrics
+- Flask admin panel: users (list of all users, search, pages), account suspension, session revocation,
+  permanent user deletion, reports, blockchain queue, Prometheus metrics
 - Admin sign-in with CSRF protection and brute-force lockout; audit log of every admin action
 - HMAC-signed webhooks; rate limiting for the API and WebSocket; Origin checks
-- 11 Docker containers (incl. a Caddy HTTPS front); Celery with 5 queues, 2 workers and beat; daily MariaDB dump
+- 12 Docker containers (incl. a Caddy HTTPS front and a ProxySQL connection pool); Celery with 5 queues, 2 workers and beat;
+  daily MariaDB dump
 
 ---
 
@@ -91,8 +93,8 @@ Before starting, the script validates `.env`
 `https://HTTPS_HOST:HTTPS_APP_PORT`) and that no other program holds the host ports, printing the exact fix.
 
 The script checks that `.env`, `worker.env` and `realm.env` exist in the project root, builds the images
-and starts all 11 containers (`db`, `redis`, `backend`, `admin`, `caddy`, `worker`, `worker_fast`, `beat`,
-`realm1..3`) in two stages — first `db`, `redis`, `realm1..3`, waiting until MariaDB is ready, then the
+and starts all 12 containers (`db`, `redis`, `proxysql`, `backend`, `admin`, `caddy`, `worker`, `worker_fast`, `beat`,
+`realm1..3`) in two stages — first `db`, `redis`, `proxysql`, `realm1..3`, waiting until MariaDB and ProxySQL are ready, then the
 application. Finally it checks that **every** container is running (and prints its logs if one failed),
 creates the admin-panel user and prints the URLs and password. FastAPI (`backend`) and Flask (`admin`)
 run under Gunicorn inside the containers. Other commands: `check` (validate `.env` and host ports without
@@ -136,7 +138,7 @@ All three files are in `.gitignore`, with `600` permissions.
 ### Local run without Docker (development)
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt   # or: .venv/bin/pip install -e ".[dev]"
 .venv/bin/python scripts/dev_server.py
 ```
 
@@ -169,6 +171,7 @@ flowchart LR
     API[backend :3890<br/>FastAPI · Gunicorn/Uvicorn]
     ADM[admin :3891<br/>Flask · Gunicorn/gthread]
     R[(Redis<br/>0 cache · 1 broker · 2 results · 3 pub/sub)]
+    PX[proxysql :6033<br/>connection pool]
     DB[(MariaDB)]
     WF[worker_fast<br/>notifications · media · maintenance]
     BEAT[beat]
@@ -179,11 +182,12 @@ flowchart LR
   end
   TON[(TON)]
   UI <-- REST + WS (protobuf) --> API
-  API --> DB & R
-  ADM --> DB & R
+  API --> PX & R
+  ADM --> PX & R
+  PX --> DB
   R --> W & WF
   BEAT --> R
-  W --> DB
+  W & WF --> PX
   W -- service wallet --> TON
   W --> R1 & R2 & R3
 ```
@@ -195,6 +199,20 @@ flowchart LR
 * **worker_fast** (`notifications`, `media`, `maintenance`) — a separate service so that a stuck
   transaction cannot block push notifications (Gunicorn_Celery.md 4.9).
 * **Redis Pub/Sub** — a "doorbell" between Gunicorn workers; the database is the source of truth.
+* **proxysql** — connection pool in front of MariaDB (the MySQL/MariaDB counterpart of PgBouncer). Every service
+  connects to `proxysql:6033`; ProxySQL multiplexes thousands of client connections onto at most 400 MariaDB
+  connections, returning a connection to the pool after each transaction ([`proxysql/`](proxysql/)).
+
+### Tuning for many clients
+
+| Where | Setting | Why |
+|---|---|---|
+| `backend/gunicorn.conf.py` | `workers` = CPU cores of the container (`GUNICORN_WORKERS`) | one async event loop per core |
+| | `worker_connections` = 10000 per worker (`GUNICORN_WORKER_CONNECTIONS`) | applied by `app.gunicorn_worker.CryptisUvicornWorker` — the stock UvicornWorker ignores it; above the limit the worker answers 503 instead of running out of memory |
+| | `backlog` = 4096, `keepalive` = 75 s | connection bursts after a restart; outlives Caddy's 60 s idle upstream connections (no random 502) |
+| `backend/app/config.py` | DB pool 20 + 30 per worker (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`) | cheap connections to ProxySQL, which caps real ones |
+| `docker-compose.yml` | `ulimits.nofile` 65536 (backend, proxysql), 131072 (caddy); `net.core.somaxconn` 4096 | every client is a file descriptor |
+| | caddy `net.ipv4.ip_local_port_range` 1024–65000 | every WebSocket is a separate Caddy → backend connection with its own local port |
 
 ## Project Structure
 
@@ -223,7 +241,7 @@ CryptisDchat_project/
 ├── scripts/                 run_gunicorn.sh (runs everything in Docker), dev_server.py (without Docker)
 ├── logs/{celery,gunicorn}/  logs
 ├── data_warehouses/         data: redis, uploads, backups
-└── docker-compose.yml, .dockerignore, requirements.txt, .env, worker.env, realm.env
+└── docker-compose.yml, .dockerignore, pyproject.toml, requirements.txt, .env, worker.env, realm.env
 ```
 
 ---

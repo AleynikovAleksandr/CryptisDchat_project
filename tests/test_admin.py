@@ -8,12 +8,28 @@ import json
 import re
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, func, select, text
 
 from admin_app import create_app, db
 from admin_app.commands import upsert_admin
 from app.config import get_settings
-from app.models import AdminAuditLog, ChainBatch, Device, User, utcnow
+from app.models import (
+    AdminAuditLog,
+    Attachment,
+    BlockedUser,
+    ChainBatch,
+    ConversationKey,
+    Device,
+    GroupMembershipEvent,
+    Message,
+    Thread,
+    ThreadMember,
+    User,
+    UserWallet,
+    utcnow,
+)
+from tests import client_crypto as cc
+from tests.test_api_messaging import open_dm
 
 
 @pytest.fixture
@@ -61,7 +77,8 @@ def test_root_redirects_to_panel(admin_client):
 
 
 def test_pages_require_login(admin_client):
-    for path in ("/admin/", "/admin/users", "/admin/reports", "/admin/blockchain-queue", "/admin/metrics"):
+    for path in ("/admin/", "/admin/users", "/admin/users/x/delete", "/admin/reports", "/admin/blockchain-queue",
+                 "/admin/metrics"):
         assert admin_client.get(path).status_code == 302
 
 
@@ -116,3 +133,74 @@ def test_metrics_and_healthz(admin_client):
     sign_in(admin_client)
     text = admin_client.get("/admin/metrics").get_data(as_text=True)
     assert "cryptis_users_total" in text and 'cryptis_chain_batches{status="failed"}' in text
+
+
+async def test_delete_user_removes_everything_and_keeps_other_groups(admin_client, make_user):
+    mallory, alice, bob = await make_user("Mallory"), await make_user("Alice"), await make_user("Bob")
+    dm, key = await open_dm(mallory, alice)
+    blob = (await mallory.client.post("/api/uploads", headers=mallory.h, files={"file": ("x.bin", b"x" * 40)},
+                                      data={"kind": "file"})).json()["id"]
+    p = cc.make_packet(mallory.keys, dm, key, 1, {"type": "file", "name": "a.pdf"}, kind="file", attachment_id=blob)
+    assert (await mallory.post(f"/api/threads/{dm}/messages", p)).status_code == 201
+    assert (await alice.post(f"/api/threads/{dm}/messages",
+                             cc.make_packet(alice.keys, dm, key, 1, {"text": "hi"}))).status_code == 201
+    own_group = (await mallory.post("/api/groups", {"title": "Mine", "member_ids": [alice.id]})).json()["id"]
+    other_group = (await alice.post("/api/groups", {"title": "Crew", "member_ids": [mallory.id, bob.id]})).json()["id"]
+    kept_dm, _ = await open_dm(alice, bob)
+    assert (await alice.post(f"/api/blocklist/{mallory.id}")).status_code == 204
+
+    app = admin_client.flask_app
+    with app.app_context():
+        # в SQLite внешние ключи выключены по умолчанию — включаем, чтобы порядок удаления проверялся как в MariaDB
+        event.listen(db.engine, "connect", lambda conn, _: conn.execute("PRAGMA foreign_keys=ON"))
+        db.engine.dispose()
+        assert db.session.execute(text("PRAGMA foreign_keys")).scalar() == 1
+        path = db.session.get(Attachment, blob).storage_path
+        for sender, seq in ((mallory.id, 1), (alice.id, 2)):  # сообщения в чужой группе
+            db.session.add(Message(thread_id=other_group, seq=seq, sender_id=sender, client_msg_id=f"c{seq}",
+                                   ciphertext=b"x", nonce=b"n" * 24, signature=b"s", key_epoch=1,
+                                   sender_key_version=1, content_hash="h"))
+        db.session.commit()
+
+    sign_in(admin_client)
+    listing = admin_client.get("/admin/users").get_data(as_text=True)
+    assert all(name in listing for name in ("Mallory", "Alice", "Bob")) and "3 users" in listing
+    page = admin_client.get(f"/admin/users/{mallory.id}/delete").get_data(as_text=True)
+    assert "Mallory" in page and "Delete permanently" in page
+    token = csrf(admin_client, f"/admin/users/{mallory.id}/delete")
+
+    # без подтверждающего слова ничего не удаляется
+    admin_client.post(f"/admin/users/{mallory.id}/delete", data={"csrf_token": token, "confirm": "yes"})
+    with app.app_context():
+        assert db.session.get(User, mallory.id) is not None
+
+    r = admin_client.post(f"/admin/users/{mallory.id}/delete", data={"csrf_token": token, "confirm": "DELETE"})
+    assert r.status_code == 302 and r.headers["Location"].endswith("/admin/users")
+    assert (await mallory.get("/api/me")).status_code == 401
+
+    with app.app_context():
+        s = db.session
+        assert s.get(User, mallory.id) is None
+        for model, col in ((UserWallet, UserWallet.user_id), (Device, Device.user_id),
+                           (ThreadMember, ThreadMember.user_id), (Message, Message.sender_id),
+                           (Attachment, Attachment.owner_id), (BlockedUser, BlockedUser.blocked_user_id),
+                           (ConversationKey, ConversationKey.recipient_id)):
+            assert s.scalar(select(func.count()).select_from(model).where(col == mallory.id)) == 0, model
+        # личный чат и группа, созданная пользователем, удалены вместе с перепиской
+        assert s.get(Thread, dm) is None and s.get(Thread, own_group) is None
+        assert s.scalar(select(func.count()).select_from(Message).where(Message.thread_id == dm)) == 0
+        # чужая группа осталась: участник исключён, сообщения других на месте, ключи будут повёрнуты
+        assert s.get(Thread, other_group) is not None and s.get(Thread, kept_dm) is not None
+        assert {m.user_id for m in s.scalars(select(ThreadMember).where(ThreadMember.thread_id == other_group))} \
+            == {alice.id, bob.id}
+        assert [m.sender_id for m in s.scalars(select(Message).where(Message.thread_id == other_group))] == [alice.id]
+        removal = s.scalar(select(GroupMembershipEvent).where(GroupMembershipEvent.thread_id == other_group,
+                                                              GroupMembershipEvent.action == "remove"))
+        assert removal.subject_user_id == mallory.id and removal.actor_id == alice.id
+        audit_row = s.scalar(select(AdminAuditLog).where(AdminAuditLog.action == "user.delete"))
+        assert audit_row.target_id == mallory.id and "Mallory" in audit_row.details
+
+    assert ("keys.destroy_all", (mallory.id,)) in admin_client.sent
+    assert ("media.delete_files", ([path],)) in admin_client.sent
+    assert ("blockchain.anchor_membership", (removal.id,)) in admin_client.sent
+    assert {t["id"] for t in (await alice.get("/api/threads")).json()} == {other_group, kept_dm}

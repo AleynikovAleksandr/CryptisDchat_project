@@ -28,6 +28,10 @@
       <button type="submit" class="danger">Suspend</button>
     </form>
     {% endif %}
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid hsl(200 19% 92%);">
+      <a class="btn danger" href="{{ url_for('admin.delete_user_view', uuid=user.id) }}">Delete user…</a>
+      <div class="muted" style="margin-top:4px;">Permanently removes the account and all its data.</div>
+    </div>
   </div>
 </div>
 

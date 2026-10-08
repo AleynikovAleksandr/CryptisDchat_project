@@ -29,8 +29,10 @@ class Settings(BaseSettings):
     db_password: str = ""
     database_url: str | None = None          # явный URL перекрывает поля выше (тесты: sqlite+aiosqlite)
     sync_database_url: str | None = None     # для Flask и Celery (pymysql)
-    db_pool_size: int = 10
-    db_max_overflow: int = 20
+    # соединения каждого воркера к ProxySQL: они дешёвые, к MariaDB уходит не больше
+    # mysql_servers.max_connections (proxysql/proxysql.cnf.template)
+    db_pool_size: int = 20
+    db_max_overflow: int = 30
 
     # --- Redis: логическое разделение по номерам DB (Gunicorn_Celery.md, 3.4) ---
     redis_host: str = "redis"

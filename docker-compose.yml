@@ -52,6 +52,34 @@ services:
     networks:
       - cryptis_network
 
+  # Пул соединений к MariaDB (аналог PgBouncer для MySQL/MariaDB): приложение ходит в базу
+  # через proxysql:6033, а ProxySQL держит к MariaDB не больше 400 соединений (proxysql/).
+  proxysql:
+    image: proxysql/proxysql:3.0.11-debian
+    container_name: cryptis_proxysql
+    restart: unless-stopped
+    environment:
+      DB_USER: ${DB_USER:-cryptis_user}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      DB_NAME: ${DB_NAME:-cryptisdchat}
+    volumes:
+      - ./proxysql/proxysql.cnf.template:/etc/proxysql/proxysql.cnf.template:ro
+      - ./proxysql/entrypoint.sh:/usr/local/bin/cryptis-proxysql:ro
+    entrypoint: ["sh", "/usr/local/bin/cryptis-proxysql"]
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6033"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    networks:
+      - cryptis_network
+
   backend:
     build:
       context: .
@@ -60,14 +88,22 @@ services:
     restart: unless-stopped
     user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
     env_file: .env
+    environment:
+      DB_HOST: proxysql
+      DB_PORT: "6033"
     volumes:
       - ./logs/gunicorn:/app/data_warehouses/gunicorn
       - ./data_warehouses/uploads:/app/uploads
     depends_on:
-      db:
+      proxysql:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # каждое соединение клиента — файловый дескриптор; лимит выше worker_connections (gunicorn.conf.py)
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    sysctls:
+      net.core.somaxconn: 4096
     command: gunicorn -c gunicorn.conf.py app.main:app
     ports:
       - "3890:8000"
@@ -87,8 +123,11 @@ services:
     restart: unless-stopped
     user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
     env_file: .env
+    environment:
+      DB_HOST: proxysql
+      DB_PORT: "6033"
     depends_on:
-      db:
+      proxysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -106,6 +145,13 @@ services:
     restart: unless-stopped
     environment:
       HTTPS_HOST: ${HTTPS_HOST:?set HTTPS_HOST (external IP or hostname) in .env}
+    # каждый клиент — два дескриптора (браузер и backend), а каждый WebSocket — отдельное
+    # соединение к backend:8000 со своим локальным портом; стандартных ~28 тыс. портов мало
+    ulimits:
+      nofile: { soft: 131072, hard: 131072 }
+    sysctls:
+      net.core.somaxconn: 4096
+      net.ipv4.ip_local_port_range: "1024 65000"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -128,11 +174,14 @@ services:
       - .env
       - worker.env
       - realm.env
+    environment:
+      DB_HOST: proxysql
+      DB_PORT: "6033"
     volumes:
       - ./data_warehouses/uploads:/app/uploads
       - ./logs/celery:/app/data_warehouses/celery
     depends_on:
-      db:
+      proxysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -156,12 +205,15 @@ services:
     restart: always
     user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
     env_file: .env
+    environment:
+      DB_HOST: proxysql
+      DB_PORT: "6033"
     volumes:
       - ./data_warehouses/uploads:/app/uploads
       - ./logs/celery:/app/data_warehouses/celery
       - ./data_warehouses/backups:/app/data_warehouses/backups
     depends_on:
-      db:
+      proxysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -184,10 +236,13 @@ services:
     restart: always
     user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
     env_file: .env
+    environment:
+      DB_HOST: proxysql
+      DB_PORT: "6033"
     volumes:
       - ./logs/celery:/app/data_warehouses/celery
     depends_on:
-      db:
+      proxysql:
         condition: service_healthy
       redis:
         condition: service_healthy

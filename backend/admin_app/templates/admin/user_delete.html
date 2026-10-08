@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+{% block title %}Delete {{ user.display_name }}{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('admin.user_detail', uuid=user.id) }}">← Back to user</a></p>
+<div class="row">
+  <div class="card" style="flex:0 1 340px;">
+    <div class="person">
+      <div class="av lg" style="background:{{ user.avatar_tint }};">{{ ((user.display_name or '?')|trim or '?')[0]|upper }}</div>
+      <div><div style="font-size:20px;font-weight:800;">{{ user.display_name or 'Unnamed' }}</div>
+        <div class="muted">{{ '@' ~ user.username if user.username else 'no username' }}</div></div>
+    </div>
+    <div class="muted" style="margin-top:14px;">UUID</div><div class="mono">{{ user.id }}</div>
+    <div class="muted" style="margin-top:8px;">TON address</div><div class="mono">{{ wallet.friendly_address if wallet else '—' }}</div>
+  </div>
+  <div class="card danger-card">
+    <h2 style="margin-top:0;">Delete permanently</h2>
+    <div>This cannot be undone. The following will be deleted:</div>
+    <ul class="impact">
+      <li>profile, TON wallets, {{ plan.devices }} device{{ '' if plan.devices == 1 else 's' }}, sessions, keys and key backup shares on the realms</li>
+      <li><b>{{ plan.direct_ids|length }}</b> direct chat{{ '' if plan.direct_ids|length == 1 else 's' }} with this user — for both sides</li>
+      <li><b>{{ plan.own_group_ids|length }}</b> group{{ '' if plan.own_group_ids|length == 1 else 's' }} created by this user — with every member's messages</li>
+      <li><b>{{ plan.messages }}</b> message{{ '' if plan.messages == 1 else 's' }} and <b>{{ plan.attachments }}</b> file{{ '' if plan.attachments == 1 else 's' }}</li>
+    </ul>
+    {% if plan.other_group_ids %}
+    <div class="muted" style="margin-top:10px;">The user will be removed from {{ plan.other_group_ids|length }} other group{{ '' if plan.other_group_ids|length == 1 else 's' }};
+      the removal is anchored in TON and the remaining members rotate the group keys.</div>
+    {% endif %}
+    <form method="post" style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
+      {{ form.hidden_tag() }}
+      {{ form.confirm(placeholder="Type DELETE to confirm", autocomplete="off", style="flex:1 1 200px;") }}
+      <button type="submit" class="danger">Delete permanently</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

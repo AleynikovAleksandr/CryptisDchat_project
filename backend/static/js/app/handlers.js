@@ -432,6 +432,7 @@ H.goEdit = () => {
 H.goDisappearing = () => set({ profileScreen: 'disappearing', navDir: 'forward' });
 H.toggleMore = () => set({ moreOpen: !state.moreOpen });
 H.searchFromProfile = () => dismissProfile(() => H.openSearch());
+H.settingsFromProfile = () => dismissProfile(() => H.openSettings());
 H.pickVanish = async (e) => {
   const label = e.currentTarget.getAttribute('data-val');
   const t = peerOf();

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ipaddress
 from datetime import timedelta
+from pathlib import Path
 
 from flask import Flask, abort, request
 from flask_sqlalchemy import SQLAlchemy
@@ -23,7 +24,9 @@ csrf = CSRFProtect()
 def create_app(settings: Settings | None = None, **overrides) -> Flask:
     s = settings or get_settings()
     s.check_production_secrets()
-    app = Flask(__name__, template_folder="templates")
+    # общая статика приложения (значок вкладки) — под /admin, чтобы попадать под IP-ограничение панели
+    app = Flask(__name__, template_folder="templates",
+                static_folder=str(Path(__file__).resolve().parents[1] / "static"), static_url_path="/admin/static")
     app.config.update(
         SECRET_KEY=s.admin_secret_key,
         SQLALCHEMY_DATABASE_URI=s.sync_db_url,

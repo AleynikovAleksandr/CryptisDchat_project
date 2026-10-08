@@ -167,7 +167,7 @@ const trackHtml = (on, handler) =>
 function settingsHtml() {
   const s = state;
   const me = s.me || {};
-  const body = 'settings-body' + (s.sidebarOpen ? '' : ' is-rail');
+  const body = 'settings-body';
 
   return '<div class="screen-scroll" data-mk="settings">' +
     '<div class="screen-head">' +
@@ -262,7 +262,7 @@ function autolockHtml() {
       '<button class="icon-back" type="button" data-click="closeAutolock">' + I.back + '</button>' +
       '<div class="screen-title">Lock after inactivity</div>' +
     '</div>' +
-    '<div class="settings-body' + (s.sidebarOpen ? '' : ' is-rail') + '">' +
+    '<div class="settings-body">' +
       ['1 minute', '5 minutes', '30 minutes', '1 hour', 'Never'].map((label) =>
         '<div class="set-row" data-mk="al' + label + '" data-val="' + label + '" data-click="pickAutolock">' +
           '<div class="set-row__label">' + label + '</div>' + radioHtml(s.autolock === label) +
@@ -298,7 +298,7 @@ function groupPermHtml() {
       '<button class="icon-back" type="button" data-click="closeGroupPerm">' + I.back + '</button>' +
       '<div class="screen-title">Who can add me to groups</div>' +
     '</div>' +
-    '<div class="settings-body' + (s.sidebarOpen ? '' : ' is-rail') + '">' +
+    '<div class="settings-body">' +
       ['Everyone', 'No one', 'Invite link only'].map((label) =>
         '<div class="set-row" data-mk="gperm' + label + '" data-val="' + label + '" data-click="pickGroupPerm">' +
           '<div class="set-row__label">' + label + '</div>' + radioHtml(s.groupPerm === label) +
@@ -343,7 +343,7 @@ function blacklistHtml() {
       '<button class="icon-back" type="button" data-click="closeBlacklist">' + I.back + '</button>' +
       '<div class="screen-title">Blocked TON addresses</div>' +
     '</div>' +
-    '<div class="settings-body' + (s.sidebarOpen ? '' : ' is-rail') + '">' +
+    '<div class="settings-body">' +
       '<div class="pill-search' + (s.blacklistFocus ? ' is-focus' : '') + '">' +
         I.search(17, '#536471') +
         '<input value="' + esc(s.blacklistQuery) + '" placeholder="Search name, username or TON address"' +
@@ -371,7 +371,7 @@ function sessionsHtml() {
       '<button class="icon-back" type="button" data-click="closeSessions">' + I.back + '</button>' +
       '<div class="screen-title">Active sessions</div>' +
     '</div>' +
-    '<div class="settings-body' + (s.sidebarOpen ? '' : ' is-rail') + '">' +
+    '<div class="settings-body">' +
       '<div class="set-note">Each device keeps its own refresh token. Ending a session revokes it immediately.</div>' +
       rows +
       '<div class="set-danger" data-click="logoutAll">Log out of all devices</div>' +
@@ -929,6 +929,12 @@ function profileDetailsHtml() {
           '<div class="paction__circle">' + I.searchDark + '</div>' +
           '<div class="paction__label">Search</div>' +
         '</div>' +
+        // общие настройки приложения — быстрый переход из личного чата
+        (peer.isGroup ? '' :
+          '<div class="paction" data-mk="psettings" data-click="settingsFromProfile">' +
+            '<div class="paction__circle">' + I.gear + '</div>' +
+            '<div class="paction__label">Settings</div>' +
+          '</div>') +
         '<div class="paction" data-click="toggleMore">' +
           '<div class="paction__circle' + (s.moreOpen ? ' is-open' : '') + '">' + I.dotsBig + '</div>' +
           '<div class="paction__label">More</div>' +
@@ -1023,7 +1029,7 @@ function profileEditHtml() {
       '<div style="flex:1;"></div>' +
       (editable ? '<button class="pill-btn' + (s.editName.trim() ? ' is-on' : '') + '" type="button" data-click="saveProfile">Save</button>' : '') +
     '</div>' +
-    '<div style="flex:1;min-height:0;overflow-y:auto;">' +
+    '<div class="pedit-scroll">' +
       '<div class="pedit-avatar-row">' +
         '<div class="pedit-avatar"' + (editable ? ' data-click="pickAvatar"' : '') +
         ' style="' + (url ? 'background-image:url(' + esc(url) + ');' : 'background:' + esc(tint) + ';') + '">' +

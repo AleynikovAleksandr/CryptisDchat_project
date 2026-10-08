@@ -1,0 +1,63 @@
+# ProxySQL — пул соединений между приложением и MariaDB (аналог PgBouncer для MySQL/MariaDB).
+#
+# Клиенты (backend, admin, Celery) держат тысячи дешёвых соединений к ProxySQL на :6033,
+# а он мультиплексирует их на ограниченное число настоящих соединений к MariaDB
+# (mysql_servers.max_connections). Соединение возвращается в общий пул после каждой
+# транзакции, поэтому рост числа воркеров Gunicorn/Celery не упирается в max_connections базы.
+#
+# Файл — шаблон: @DB_USER@, @DB_PASSWORD@, @DB_NAME@, @ADMIN_PASSWORD@ подставляет
+# proxysql/entrypoint.sh из переменных окружения (.env) при каждом старте контейнера.
+
+datadir="/var/lib/proxysql"
+
+admin_variables=
+{
+    # админ-интерфейс ProxySQL только внутри контейнера; пароль случайный на каждый запуск
+    admin_credentials="admin:@ADMIN_PASSWORD@"
+    mysql_ifaces="127.0.0.1:6032"
+}
+
+mysql_variables=
+{
+    threads=4
+    # клиентских соединений к ProxySQL (сумма пулов всех воркеров) — с большим запасом
+    max_connections=20000
+    interfaces="0.0.0.0:6033"
+    # SQLAlchemy определяет по версии сервера, что это MariaDB, — отдаём её, а не версию ProxySQL
+    server_version="11.4.0-MariaDB"
+    default_charset="utf8mb4"
+    # проверка доступности MariaDB; при недоступности ProxySQL перестаёт слать туда запросы
+    monitor_username="@DB_USER@"
+    monitor_password="@DB_PASSWORD@"
+    monitor_connect_interval=10000
+    monitor_ping_interval=10000
+    connect_timeout_server=3000
+    # держать прогретыми 10% соединений к базе, чтобы всплеск нагрузки не ждал подключения
+    free_connections_pct=10
+}
+
+mysql_servers=
+(
+    {
+        address="db"
+        port=3306
+        hostgroup=0
+        # потолок настоящих соединений к MariaDB (у неё max-connections=500, остальное —
+        # запас для root, бэкапов и ручного доступа)
+        max_connections=400
+    }
+)
+
+mysql_users=
+(
+    {
+        username="@DB_USER@"
+        password="@DB_PASSWORD@"
+        default_hostgroup=0
+        default_schema="@DB_NAME@"
+        max_connections=20000
+        # транзакция целиком идёт через одно соединение к базе
+        transaction_persistent=1
+        active=1
+    }
+)

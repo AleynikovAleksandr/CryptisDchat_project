@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CryptisDchat</title>
+<link rel="icon" type="image/png" href="/static/images/icon-round.png">
+<link rel="apple-touch-icon" href="/static/images/icon-180.png">
+<!-- фон начинает грузиться сразу, вместе с HTML, — браузер сам выберет размер под экран -->
+<link rel="preload" as="image" type="image/webp" imagesrcset="/static/images/login-bg-1280.webp 1280w, /static/images/login-bg-1920.webp 1920w, /static/images/login-bg-2560.webp 2560w" imagesizes="100vw" fetchpriority="high">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
@@ -13,12 +17,42 @@
   #submit-btn:hover {
     background: #1f2228;
   }
+
+  /* Фон входа: пока картинка грузится, виден её размытый эскиз (206 байт прямо в странице);
+     сама картинка скрыта и проявляется целиком только после полной загрузки и декодирования —
+     без полос сверху вниз. */
+  .login-bg-ph {
+    position: absolute; inset: -40px; z-index: 0;
+    background: #1f2228 url(data:image/webp;base64,UklGRsYAAABXRUJQVlA4ILoAAABwBQCdASogABUAPtFYn0woJSKiMBgMAQAaCWcABRABeW+ljd8VT9/g0dGeUnkwvW5V/xhIAP7v4s7r3NfPxq/WnEg7fWqnWQxlxyllzm+DKUCkNBp6FU72SNqjKe5aV5E2m1EzQIaw3rXCyZ/YJtVkC7Y7JnT4q6og7bv6cAwKObF5cL1GI3M7odqnKutdpEcXyyRyk7FbvHjuQgBAaa8hBc7OBHSPWFR+iMRhow/DdbL+Q57S0hgIAAA=) center / cover no-repeat;
+    filter: blur(24px);
+  }
+  .login-bg {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0;
+    opacity: 0; transition: opacity .4s ease;
+  }
+  .login-bg.is-loaded { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .login-bg { transition: none; } }
 </style>
+<noscript><style>.login-bg { opacity: 1; }</style></noscript>
 </head>
 <body>
 
 <div style="min-height:100vh;width:100%;position:relative;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;overflow:hidden;padding:16px;">
-  <img src="/static/images/login-bg.jpg" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;">
+  <div class="login-bg-ph"></div>
+  <picture>
+    <source type="image/webp" srcset="/static/images/login-bg-1280.webp 1280w, /static/images/login-bg-1920.webp 1920w, /static/images/login-bg-2560.webp 2560w" sizes="100vw">
+    <img class="login-bg" src="/static/images/login-bg.jpg" alt="" decoding="async" fetchpriority="high">
+  </picture>
+  <script>
+    (function () {
+      var img = document.querySelector('.login-bg');
+      function show() {
+        (img.decode ? img.decode() : Promise.resolve()).catch(function () {})
+          .then(function () { img.classList.add('is-loaded'); });
+      }
+      if (img.complete && img.naturalWidth) show(); else img.addEventListener('load', show);
+    })();
+  </script>
   <div style="position: absolute; inset: 0; z-index: 1; background: rgba(252,252,252,0.75); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); border: 1px solid rgba(240,240,240,0.8); box-shadow: 0px 1px 40px 10px rgba(0,0,0,0.08); left: -4px; top: -6px"></div>
 
   <form id="login-form" style="position: relative; z-index: 2; width: 100%; max-width: 420px; padding: clamp(28px, 6vw, 40px) clamp(22px, 6vw, 36px) 20px; display: flex; flex-direction: column; gap: 20px; background: rgba(252,252,252,0.75); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(240,240,240,0.8); border-radius: 20px; box-shadow: 0 4px 30px rgba(0,0,0,0.08); box-sizing: border-box;">

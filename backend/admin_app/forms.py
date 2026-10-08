@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from flask_wtf import FlaskForm
 from wtforms import PasswordField, SelectField, StringField, SubmitField, TextAreaField
-from wtforms.validators import DataRequired, Length
+from wtforms.validators import AnyOf, DataRequired, Length
 
 
 class LoginForm(FlaskForm):
@@ -21,6 +21,13 @@ class ActionForm(FlaskForm):
 class SuspendForm(FlaskForm):
     reason = StringField("Reason", validators=[DataRequired(), Length(max=255)])
     submit = SubmitField("Suspend account")
+
+
+class DeleteUserForm(FlaskForm):
+    """Необратимое удаление: администратор вручную вводит слово DELETE."""
+
+    confirm = StringField("Type DELETE to confirm", validators=[DataRequired(), AnyOf(["DELETE"])])
+    submit = SubmitField("Delete permanently")
 
 
 class ReportForm(FlaskForm):

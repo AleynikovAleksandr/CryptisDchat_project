@@ -245,8 +245,8 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
 }
 .icon-back:hover { background: hsl(200 19% 96%); }
 
-.settings-body { max-width: 720px; padding: 8px 28px 48px; }
-.settings-body.is-rail { width: 100%; margin: 0 auto; }
+/* колонка настроек всегда по центру — и при развёрнутом, и при свёрнутом списке чатов */
+.settings-body { width: 100%; max-width: 720px; margin: 0 auto; padding: 8px 28px 48px; }
 
 .set-h { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
 .set-h + .set-note, .set-note { font-size: 13.5px; color: #536471; margin-bottom: 6px; }
@@ -1150,11 +1150,14 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
 /* редактирование профиля */
 .pedit-head { position: relative; display: flex; align-items: center; gap: 8px; padding: 14px 16px; }
 .pedit-head__title {
-  position: absolute; left: 0; right: 20px;
+  position: absolute; left: 0; right: 0;
   text-align: center; font-size: 17px; font-weight: 800;
   pointer-events: none;
 }
-.pedit-avatar-row { display: flex; align-items: center; justify-content: center; padding: 18px 42px 0 22px; }
+/* заголовок, аватар и поля центрируются по одной оси — по середине карточки */
+.pedit-avatar-row { display: flex; align-items: center; justify-content: center; padding: 18px 22px 0; }
+/* полоса прокрутки (Windows/Linux) резервирует место с обеих сторон, не сдвигая содержимое влево */
+.pedit-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; }
 .pedit-avatar {
   position: relative;
   display: flex; align-items: center; justify-content: center;

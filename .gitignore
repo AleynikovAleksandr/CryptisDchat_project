@@ -21,3 +21,8 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# сборка pyproject.toml (pip wheel / pip install -e .)
+build/
+dist/
+*.egg-info/

@@ -27,7 +27,13 @@ https://{$HTTPS_HOST}:3443, https://localhost:3443 {
 			lifetime 180d
 		}
 	}
-	reverse_proxy {$APP_UPSTREAM:backend:8000}
+	reverse_proxy {$APP_UPSTREAM:backend:8000} {
+		transport http {
+			# простаивающее соединение к backend закрываем раньше, чем его закроет Gunicorn (keepalive 75)
+			keepalive 60s
+			keepalive_idle_conns 512
+		}
+	}
 }
 
 https://{$HTTPS_HOST}:3444, https://localhost:3444 {

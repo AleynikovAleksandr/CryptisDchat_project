@@ -11,7 +11,8 @@ from sqlalchemy import func, or_, select, update
 from werkzeug.security import check_password_hash
 
 from admin_app import db
-from admin_app.forms import ActionForm, LoginForm, ReportForm, SearchForm, SuspendForm
+from admin_app.forms import ActionForm, DeleteUserForm, LoginForm, ReportForm, SearchForm, SuspendForm
+from admin_app.user_deletion import delete_user, plan
 from app.models import (
     AdminAuditLog,
     AdminUser,
@@ -189,22 +190,35 @@ def metrics():
 
 
 # --------------------------------------------------------------------------- пользователи
+USERS_PER_PAGE = 50
+
+
 @bp.get("/admin/users")
 @login_required
 def users():
     form = SearchForm(request.args)
     q = (form.q.data or "").strip()
-    stmt = select(User).order_by(User.created_at.desc()).limit(100)
+    page = max(request.args.get("page", 1, type=int), 1)
+    ids = select(User.id)
     if q:
         like = f"%{q.lstrip('@')}%"
-        stmt = (select(User).outerjoin(UserWallet, UserWallet.user_id == User.id)
-                .where(or_(User.id == q, User.username.ilike(like), User.display_name.ilike(like),
-                           UserWallet.address.ilike(like), UserWallet.friendly_address.ilike(like)))
-                .distinct().limit(100))
-    rows = db.session.scalars(stmt).all()
+        ids = (ids.outerjoin(UserWallet, UserWallet.user_id == User.id)
+               .where(or_(User.id == q, User.username.ilike(like), User.display_name.ilike(like),
+                          UserWallet.address.ilike(like), UserWallet.friendly_address.ilike(like)))
+               .distinct())
+    total = db.session.scalar(select(func.count()).select_from(ids.subquery())) or 0
+    pages = max((total + USERS_PER_PAGE - 1) // USERS_PER_PAGE, 1)
+    page = min(page, pages)
+    rows = db.session.scalars(select(User).where(User.id.in_(ids)).order_by(User.created_at.desc(), User.id)
+                              .offset((page - 1) * USERS_PER_PAGE).limit(USERS_PER_PAGE)).all()
     wallets = {w.user_id: w for w in db.session.scalars(
         select(UserWallet).where(UserWallet.user_id.in_([u.id for u in rows]), UserWallet.is_primary))}
-    return render_template("admin/users.html", users=rows, wallets=wallets, form=form, logout_form=ActionForm())
+    devices = dict(db.session.execute(
+        select(Device.user_id, func.count()).where(Device.user_id.in_([u.id for u in rows]),
+                                                   Device.revoked_at.is_(None))
+        .group_by(Device.user_id)).all())
+    return render_template("admin/users.html", users=rows, wallets=wallets, devices=devices, form=form, q=q,
+                           total=total, page=page, pages=pages, logout_form=ActionForm())
 
 
 @bp.get("/admin/users/<uuid>")
@@ -279,6 +293,57 @@ def revoke_sessions(uuid: str):
         _publish_revoked(uuid)
         flash("All refresh tokens revoked.", "ok")
     return redirect(url_for("admin.user_detail", uuid=uuid))
+
+
+@bp.route("/admin/users/<uuid>/delete", methods=["GET", "POST"])
+@login_required
+def delete_user_view(uuid: str):
+    user = db.session.get(User, uuid)
+    if user is None:
+        return render_template("admin/not_found.html", logout_form=ActionForm()), 404
+    form = DeleteUserForm()
+    if form.validate_on_submit():
+        name = user.display_name or "Unnamed"
+        wallet = next((w.friendly_address for w in user.wallets if w.is_primary), "")
+        db.session.expunge(user)  # строки удаляются запросами DELETE, объект в сессии больше не нужен
+        result = delete_user(db.session, uuid)
+        audit("user.delete", "user", uuid, display_name=name, username=user.username, wallet=wallet,
+              deleted_threads=len(result.deleted_thread_ids), left_groups=len(result.left_group_ids),
+              **result.stats)
+        db.session.commit()
+        _after_delete(uuid, result)
+        flash(f"User {name} deleted with all their data.", "ok")
+        return redirect(url_for("admin.users"))
+    if request.method == "POST":
+        flash("Type DELETE in capital letters to confirm.", "error")
+    wallet = next((w for w in user.wallets if w.is_primary), None)
+    return render_template("admin/user_delete.html", user=user, wallet=wallet, plan=plan(db.session, uuid),
+                           form=form, logout_form=ActionForm())
+
+
+def _after_delete(user_id: str, result) -> None:
+    """Всё, что вне БД админки: файлы и доли ключей — воркеру, живые сессии и списки чатов — через Redis."""
+    enqueue("keys.destroy_all", user_id)
+    if result.file_paths:
+        enqueue("media.delete_files", result.file_paths)
+    for event_id in result.membership_event_ids:
+        enqueue("blockchain.anchor_membership", event_id)
+    _publish_revoked(user_id)
+    try:
+        cache = _redis(settings().redis_db_cache)
+        cache.delete(f"presence:{user_id}", f"threads:{user_id}", *[f"threads:{u}" for u in result.notify])
+        stale = list(cache.scan_iter(match=f"unread:{user_id}:*", count=500))
+        if stale:
+            cache.delete(*stale)
+        bus = _redis(settings().redis_db_pubsub)
+        deleted = set(result.deleted_thread_ids)
+        for uid, thread_ids in result.notify.items():
+            for tid in thread_ids:
+                data = {"thread_id": tid, "deleted": True} if tid in deleted else \
+                    {"thread_id": tid, "members_changed": True, "removed_user_id": user_id}
+                bus.publish(channel(uid), encode_event("thread.updated", data))
+    except redis.RedisError:
+        current_app.logger.warning("could not notify clients about deleted user %s", user_id)
 
 
 # --------------------------------------------------------------------------- жалобы
