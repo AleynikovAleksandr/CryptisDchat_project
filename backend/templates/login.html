@@ -6,7 +6,6 @@
 <title>CryptisDchat</title>
 <link rel="icon" type="image/png" href="/static/images/icon-round.png">
 <link rel="apple-touch-icon" href="/static/images/icon-180.png">
-<!-- фон начинает грузиться сразу, вместе с HTML, — браузер сам выберет размер под экран -->
 <link rel="preload" as="image" type="image/webp" imagesrcset="/static/images/login-bg-1280.webp 1280w, /static/images/login-bg-1920.webp 1920w, /static/images/login-bg-2560.webp 2560w" imagesizes="100vw" fetchpriority="high">
 <style>
   * { box-sizing: border-box; }
@@ -18,9 +17,6 @@
     background: #1f2228;
   }
 
-  /* Фон входа: пока картинка грузится, виден её размытый эскиз (206 байт прямо в странице);
-     сама картинка скрыта и проявляется целиком только после полной загрузки и декодирования —
-     без полос сверху вниз. */
   .login-bg-ph {
     position: absolute; inset: -40px; z-index: 0;
     background: #1f2228 url(data:image/webp;base64,UklGRsYAAABXRUJQVlA4ILoAAABwBQCdASogABUAPtFYn0woJSKiMBgMAQAaCWcABRABeW+ljd8VT9/g0dGeUnkwvW5V/xhIAP7v4s7r3NfPxq/WnEg7fWqnWQxlxyllzm+DKUCkNBp6FU72SNqjKe5aV5E2m1EzQIaw3rXCyZ/YJtVkC7Y7JnT4q6og7bv6cAwKObF5cL1GI3M7odqnKutdpEcXyyRyk7FbvHjuQgBAaa8hBc7OBHSPWFR+iMRhow/DdbL+Q57S0hgIAAA=) center / cover no-repeat;

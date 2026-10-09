@@ -12,7 +12,6 @@
          color: #1d1d1f; -webkit-font-smoothing: antialiased; }
   @keyframes glassIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 
-  /* фон — тот же снимок, что и на входе в приложение; CSP пускает только 'self', поэтому без data:-эскиза */
   .login-root { position: relative; min-height: 100vh; min-height: 100dvh; width: 100%; display: flex;
                 align-items: center; justify-content: center; padding: 16px; overflow: hidden;
                 background: #e9ecf1 url("{{ url_for('static', filename='images/login-bg.jpg') }}") center / cover no-repeat; }
@@ -20,11 +19,9 @@
   @media (min-width: 1281px) and (max-width: 1920px) { .login-root { background-image: url("{{ url_for('static', filename='images/login-bg-1920.webp') }}"); } }
   @media (min-width: 1921px) { .login-root { background-image: url("{{ url_for('static', filename='images/login-bg-2560.webp') }}"); } }
 
-  /* полупрозрачная белая вуаль поверх фона */
   .login-veil { position: absolute; inset: 0; z-index: 1; background: rgba(255,255,255,0.55);
                 backdrop-filter: blur(3px) saturate(120%); -webkit-backdrop-filter: blur(3px) saturate(120%); }
 
-  /* карточка Liquid Glass */
   .glass { position: relative; z-index: 2; width: 100%; max-width: 380px; padding: 34px 28px 28px;
            display: flex; flex-direction: column; gap: 22px; border-radius: 28px;
            background: linear-gradient(160deg, rgba(255,255,255,0.62), rgba(255,255,255,0.38));

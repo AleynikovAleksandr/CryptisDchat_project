@@ -10,7 +10,7 @@ data_warehouses/*
 logs/**/*.log
 celerybeat-schedule*
 
-# Node (только esbuild для сборки клиента: scripts/build_frontend.mjs)
+# Node: esbuild для локальной проверки сборки клиента (scripts/build_frontend.mjs)
 node_modules/
 
 # Python

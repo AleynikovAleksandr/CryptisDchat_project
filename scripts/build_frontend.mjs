@@ -2,6 +2,7 @@
 /* Сборка клиента для образа backend: все <script src="/static/js/..."> страницы склеиваются
  * в один минифицированный файл static/dist/<страница>.<хеш>.js, без source map и комментариев.
  *
+ *   npm install --no-save esbuild@0.24.2      # один раз; package.json не создаётся
  *   node scripts/build_frontend.mjs --out <каталог>
  *
  * В <каталог> пишутся templates/*.html (с одним тегом вместо списка скриптов),

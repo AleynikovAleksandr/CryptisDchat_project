@@ -151,13 +151,13 @@ Admin panel: [http://127.0.0.1:3891/admin/](http://127.0.0.1:3891/admin/), `admi
 ### Client build (minified JavaScript)
 
 The `backend` image does not ship the readable JS sources. Its first stage (`node:22-alpine`) runs
-[`scripts/build_frontend.mjs`](scripts/build_frontend.mjs) with esbuild (pinned in `package.json`): all
+[`scripts/build_frontend.mjs`](scripts/build_frontend.mjs) with esbuild 0.24.2 (installed only in that stage): all
 `<script src="/static/js/…">` tags of `login.html` and `cryptis.html` are concatenated into one minified
 `static/dist/<page>.<hash>.js` without comments or source maps, and `static/js/` is removed from the image.
 The local dev server keeps using the sources. To check the build locally:
 
 ```bash
-npm ci && node scripts/build_frontend.mjs --out /tmp/cryptis-build
+npm install --no-save esbuild@0.24.2 && node scripts/build_frontend.mjs --out /tmp/cryptis-build
 ```
 
 This only makes the code harder to read — anything the browser runs is visible in DevTools. Security relies on

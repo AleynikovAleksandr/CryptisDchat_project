@@ -4,8 +4,8 @@
 # --- этап 1: клиент — все скрипты страницы в один минифицированный файл, без source map ---
 FROM node:22-alpine AS frontend
 WORKDIR /build
-COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# esbuild ставится только здесь, на этапе сборки; версия закреплена, package.json в проекте не нужен
+RUN npm install --no-save --no-audit --no-fund esbuild@0.24.2
 COPY scripts/build_frontend.mjs scripts/
 COPY backend/templates backend/templates
 COPY backend/static/js backend/static/js

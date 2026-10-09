@@ -11,9 +11,6 @@
 </head>
 
 <body>
-<!-- ============================================================
-     РАЗМЕТКА
-     ============================================================ -->
 <div class="app">
   <div class="app-row">
     <aside id="sidebar" class="sidebar"></aside>
@@ -21,20 +18,12 @@
   </div>
 </div>
 
-<!-- окна поверх страницы -->
 <div id="overlays"></div>
 
-<!-- скрытые поля выбора файлов -->
 <input id="dc-file-input" type="file" multiple hidden>
 <input id="dc-avatar-input" type="file" accept="image/*" hidden>
 <input id="dc-group-photo" type="file" accept="image/*" hidden>
 
-<!-- ============================================================
-     СКРИПТ
-     ============================================================ -->
-<!-- ============================================================
-     СКРИПТЫ: криптография и транспорт → ядро → данные → обработчики → экраны → движок
-     ============================================================ -->
 <script src="/static/js/vendor/nacl-fast.min.js"></script>
 <script src="/static/js/lib/proto.js"></script>
 <script src="/static/js/lib/crypto.js"></script>
