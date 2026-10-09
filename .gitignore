@@ -30,3 +30,7 @@ build/
 dist/
 *.egg-info/
 data_warehouses/
+
+# Environment files
+realm.env
+worker.env
