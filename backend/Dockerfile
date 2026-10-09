@@ -9,8 +9,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY backend/requirements.txt /tmp/requirements.txt
-RUN pip install -r /tmp/requirements.txt
+# зависимости из общего pyproject.toml (README.md и LICENSE нужны setuptools для сборки метаданных)
+COPY pyproject.toml README.md LICENSE /tmp/project/
+RUN pip install "/tmp/project[backend]" && rm -rf /tmp/project
 
 COPY backend/ /app/
 

@@ -159,6 +159,9 @@ def main() -> int:
         thread(carol, f"Crew {RUN}").click()
         expect(carol.locator(".bubble").filter(has_text="Welcome to the group")).to_be_visible(timeout=20000)
         log("carol: group message decrypted with the TreeKEM epoch key")
+        row = carol.locator(".msg-row").filter(has_text="Welcome to the group")
+        expect(row.locator(".msg-row__av")).to_have_text("A", timeout=10000)  # аватар автора (инициал Алисы)
+        expect(alice.locator(".msg-row.is-mine .msg-row__av")).to_have_count(0)  # у своих сообщений аватара нет
         shot(carol, "05-group")
 
         # --- блокировка и разблокировка PIN (ключи только в зашифрованном OPFS) ---

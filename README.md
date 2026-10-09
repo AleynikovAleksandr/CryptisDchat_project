@@ -104,7 +104,7 @@ Application containers run as the user who started the script (`id -u`/`id -g`),
 | URL | What it is |
 |---|---|
 | [https://85.95.150.8:3443/](https://85.95.150.8:3443/) | the app: sign-in (`Login.html`) → messenger (`cryptis.html`), API, WebSocket |
-| [https://85.95.150.8:3444/admin/](https://85.95.150.8:3444/admin/) | Flask admin panel (login and password are in `.env`: `ADMIN_USERNAME` / `ADMIN_PASSWORD`) |
+| [https://85.95.150.8:3444/admin/](https://85.95.150.8:3444/admin/) | Flask admin panel (login in `.env` `ADMIN_USERNAME`; the password is stored only as a hash in `ADMIN_PASSWORD_HASH`, made with `flask --app admin_app.wsgi hash-password`) |
 | `http://localhost:3890` / `http://localhost:3891/admin/` | the same over an SSH / VS Code port forward |
 
 **HTTPS with a self-signed certificate.** Browsers enable Web Crypto (`crypto.subtle`) only over HTTPS or on
@@ -138,7 +138,7 @@ All three files are in `.gitignore`, with `600` permissions.
 ### Local run without Docker (development)
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt   # or: .venv/bin/pip install -e ".[dev]"
+python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/python scripts/dev_server.py
 ```
 
@@ -155,6 +155,7 @@ Admin panel: [http://127.0.0.1:3891/admin/](http://127.0.0.1:3891/admin/), `admi
 .venv/bin/python -m playwright install chromium # once
 .venv/bin/python scripts/dev_server.py &        # stack for the browser scenario
 .venv/bin/python tests/e2e/e2e_browser.py       # end-to-end scenario in Chromium (4 browser profiles)
+.venv/bin/python tests/e2e/e2e_mobile.py        # phone layout (390×844, touch): one column, long-press menu, sheets
 ```
 
 ---
@@ -233,7 +234,7 @@ CryptisDchat_project/
 │   ├── templates/           login.html, cryptis.html (from the mockups)
 │   ├── static/              css/, images/, js/{lib,app,vendor}
 │   ├── utils/               logging with token redaction
-│   ├── gunicorn.conf.py, gunicorn_admin.conf.py, Dockerfile, requirements.txt
+│   ├── gunicorn.conf.py, gunicorn_admin.conf.py, Dockerfile
 ├── worker/                  celery_app.py, tasks/, gateways/ (TON, realm, push), Dockerfile
 ├── realm/                   secret-share storage service (×3 containers), Dockerfile
 ├── proto/cryptis.proto      binary transport format (spec 6.2, 6.4)
@@ -241,7 +242,7 @@ CryptisDchat_project/
 ├── scripts/                 run_gunicorn.sh (runs everything in Docker), dev_server.py (without Docker)
 ├── logs/{celery,gunicorn}/  logs
 ├── data_warehouses/         data: redis, uploads, backups
-└── docker-compose.yml, .dockerignore, pyproject.toml, requirements.txt, .env, worker.env, realm.env
+└── docker-compose.yml, .dockerignore, pyproject.toml (all dependencies), .env, worker.env, realm.env
 ```
 
 ---

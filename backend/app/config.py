@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     admin_secret_key: str = "change-me-admin"
     admin_username: str = "admin"
     admin_password: str = ""
+    admin_password_hash: str = ""             # хеш werkzeug вместо пароля открытым текстом; важнее ADMIN_PASSWORD
     admin_allowed_ips: str = ""               # пусто = без ограничения по IP
     webhook_secret: str = "change-me-webhook"
 

@@ -75,6 +75,8 @@ H.onSearchFocus = () => set({ searchFocus: true });
 H.onSearchBlur = () => set({ searchFocus: false });
 H.clearQuery = () => set({ query: '' });
 H.pickThread = (e) => openThread(e.currentTarget.getAttribute('data-id'));
+// телефон: из чата обратно к списку; activeThread сбрасывается, чтобы новые сообщения снова считались непрочитанными
+H.backToList = () => set({ activeThread: null, searchOpen: false, msgQuery: '', menuId: null, hoverId: null, replyDraft: null });
 
 /* --- настройки --- */
 H.goAutolock = () => set({ view: 'autolock' });
@@ -213,23 +215,81 @@ const findMsg = (id) => activeMessages().find((m) => m.id === id);
 
 H.hoverMsg = (e) => set({ hoverId: e.currentTarget.getAttribute('data-msg-id') });
 H.unhoverMsg = () => set({ hoverId: null });
-H.openMsgMenu = (e) => {
-  const id = e.currentTarget.getAttribute('data-id');
+/* Меню сообщения под элементом anchor (кнопка «⋯» или сам пузырь), не выходя за края <main>. */
+function openMsgMenuAt(id, anchor) {
   const msg = findMsg(id);
-  const btn = e.currentTarget;
-  const rect = btn.getBoundingClientRect();
-  const parentRect = btn.closest('main').getBoundingClientRect();
-  const menuH = msg && msg.file ? 212 : 256;
+  if (!msg) return;
+  const rect = anchor.getBoundingClientRect();
+  const parentRect = anchor.closest('main').getBoundingClientRect();
+  const menuH = msg.file ? 212 : 256;
   const below = rect.bottom - parentRect.top;
   const flipUp = below + menuH > parentRect.height - 16;
   setState({
     menuId: id, hoverId: id,
     menuPos: {
       top: flipUp ? Math.max(rect.bottom - parentRect.top - menuH, 8) : below,
-      left: Math.min(rect.left - parentRect.left, parentRect.width - 260),
+      left: Math.max(8, Math.min(rect.left - parentRect.left, parentRect.width - 254)),
     },
   });
-};
+}
+H.openMsgMenu = (e) => openMsgMenuAt(e.currentTarget.getAttribute('data-id'), e.currentTarget);
+
+/* Сенсорный экран: кнопок при наведении нет — меню открывается долгим нажатием на сообщение.
+ * iOS Safari не присылает contextmenu на долгое нажатие, поэтому считаем время касания сами;
+ * contextmenu (Android, правая кнопка мыши) открывает то же меню. */
+const LONG_PRESS_MS = 450;
+let pressTimer = null, pressStart = null, pressFired = false, suppressClickUntil = 0;
+
+function msgAnchor(target) {
+  const row = target.closest && target.closest('.msg-row[data-msg-id]');
+  if (!row) return null;
+  return { id: row.getAttribute('data-msg-id'), el: row.querySelector('.bubble, .file-card') || row };
+}
+function cancelPress() { clearTimeout(pressTimer); pressTimer = null; }
+
+function bindLongPress(root) {
+  root.addEventListener('touchstart', (e) => {
+    const a = msgAnchor(e.target);
+    pressFired = false;
+    if (!a || e.touches.length !== 1) return;
+    pressStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    cancelPress();
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      pressFired = true;
+      if (navigator.vibrate) navigator.vibrate(10);
+      openMsgMenuAt(a.id, a.el);
+    }, LONG_PRESS_MS);
+  }, { passive: true });
+  root.addEventListener('touchmove', (e) => {
+    if (!pressTimer || !pressStart) return;
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - pressStart.x) > 10 || Math.abs(t.clientY - pressStart.y) > 10) cancelPress();
+  }, { passive: true });
+  root.addEventListener('touchend', (e) => {
+    cancelPress();
+    if (!pressFired) return;
+    pressFired = false;
+    e.preventDefault();
+    suppressClickUntil = Date.now() + 400;  // клик-эхо от отпускания пальца
+  });
+  root.addEventListener('touchcancel', cancelPress);
+  root.addEventListener('contextmenu', (e) => {
+    const a = msgAnchor(e.target);
+    if (!a) return;
+    e.preventDefault();
+    if (!pressFired && !state.menuId) openMsgMenuAt(a.id, a.el);
+  });
+  // клик-эхо от отпускания пальца не должен закрыть только что открытое меню или скачать файл;
+  // нажатия на пункты самого меню проходят всегда
+  root.addEventListener('click', (e) => {
+    const echo = Date.now() < suppressClickUntil;
+    suppressClickUntil = 0;  // подавляется не больше одного клика
+    if (!echo || e.target.closest('.msg-menu')) return;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+}
 H.closeMsgMenu = () => set({ menuId: null });
 H.react = () => showToast('Reactions are coming soon');
 H.noop = () => {};

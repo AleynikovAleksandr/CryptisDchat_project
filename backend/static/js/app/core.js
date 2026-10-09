@@ -58,6 +58,16 @@ function setState(patch) {
 const set = (patch) => setState(patch);
 
 /* ============================================================
+   Мобильная раскладка: та же граница, что у @media в cryptis.css
+   ============================================================ */
+const MOBILE_MQ = window.matchMedia('(max-width: 768px)');
+const isMobile = () => MOBILE_MQ.matches;
+// на телефоне список чатов всегда развёрнут — узкой полосы с иконками нет
+const sidebarExpanded = () => state.sidebarOpen || isMobile();
+// телефон показывает одну колонку: список чатов или экран справа (чат, настройки, PIN)
+const showsMain = () => !!state.gate || state.view !== 'chat' || !!(state.activeThread && threadById(state.activeThread));
+
+/* ============================================================
    Метки интерфейса ↔ коды API
    ============================================================ */
 const LABELS = {

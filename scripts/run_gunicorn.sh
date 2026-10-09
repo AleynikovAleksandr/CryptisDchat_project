@@ -21,7 +21,7 @@
 #        worker, worker_fast, beat — Celery;
 #   5. ждёт, пока backend ответит на /healthz, и проверяет, что работают ВСЕ 11 контейнеров —
 #      если какой-то упал, показывает его логи;
-#   6. создаёт администратора Flask-панели из ADMIN_USERNAME / ADMIN_PASSWORD в .env.
+#   6. создаёт администратора Flask-панели из ADMIN_USERNAME и ADMIN_PASSWORD_HASH (или ADMIN_PASSWORD) в .env.
 #
 # Контейнеры приложения работают от пользователя, запустившего скрипт (id -u / id -g), а не от root:
 # так у них всегда есть права на запись в logs/ и data_warehouses/.
@@ -60,7 +60,7 @@ env_value() { grep -E "^$1=" "${2:-.env}" | head -1 | cut -d= -f2- | tr -d '\r';
 # обязательные переменные .env и секреты, которые нельзя оставлять заглушками change-me-*
 REQUIRED=(APP_ENV HTTPS_HOST PUBLIC_ORIGIN ALLOWED_WS_ORIGINS TON_PROOF_DOMAIN
           DB_NAME DB_USER DB_PASSWORD DB_ROOT_PASSWORD
-          JWT_SECRET TON_PROOF_SECRET ADMIN_SECRET_KEY ADMIN_USERNAME ADMIN_PASSWORD WEBHOOK_SECRET)
+          JWT_SECRET TON_PROOF_SECRET ADMIN_SECRET_KEY ADMIN_USERNAME WEBHOOK_SECRET)
 SECRETS=(DB_PASSWORD DB_ROOT_PASSWORD JWT_SECRET TON_PROOF_SECRET ADMIN_SECRET_KEY ADMIN_PASSWORD WEBHOOK_SECRET)
 
 check_env() {
@@ -78,6 +78,9 @@ check_env() {
     v="$(env_value "$k" || true)"
     [[ "$v" != change-me* ]] || problems+=("$k — заглушка change-me-*; сгенерируйте: openssl rand -hex 32")
   done
+  # пароль админки: лучше хеш (ADMIN_PASSWORD_HASH), открытый ADMIN_PASSWORD — запасной вариант
+  [[ -n "$(env_value ADMIN_PASSWORD_HASH || true)$(env_value ADMIN_PASSWORD || true)" ]] \
+    || problems+=("ADMIN_PASSWORD_HASH — пустой; получите хеш: docker compose run --rm admin flask --app admin_app.wsgi hash-password")
   for k in HTTPS_APP_PORT HTTPS_ADMIN_PORT DB_EXTERNAL_PORT; do
     v="$(env_value "$k" || true)"
     [[ -z "$v" || "$v" =~ ^[0-9]+$ ]] || problems+=("$k=$v — должен быть номером порта")
@@ -213,7 +216,7 @@ up() {
 
   CryptisDchat запущен — все ${#ALL[@]} контейнеров работают
   ─ приложение:  https://${https_host}:${app_port}   (или http://localhost:3890 через SSH/VS Code)
-  ─ админка:     https://${https_host}:${admin_port}/admin/   логин: $(env_value ADMIN_USERNAME)   пароль: $(env_value ADMIN_PASSWORD)
+  ─ админка:     https://${https_host}:${admin_port}/admin/   логин: $(env_value ADMIN_USERNAME)   (пароль в .env не хранится — только хеш)
   ─ состояние:   scripts/run_gunicorn.sh status
   ─ остановка:   scripts/run_gunicorn.sh down
 

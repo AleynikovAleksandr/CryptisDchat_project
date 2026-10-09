@@ -1,13 +1,128 @@
-{% extends "admin/base.html" %}
-{% block title %}Sign in{% endblock %}
-{% block content %}
-<div style="max-width:380px;margin:12vh auto 0;" class="card">
-  <h1 style="text-align:center;">CryptisDchat Admin</h1>
-  <form method="post" style="display:flex;flex-direction:column;gap:12px;">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign in · CryptisDchat Admin</title>
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='images/icon-round.png') }}">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+         color: #1d1d1f; -webkit-font-smoothing: antialiased; }
+  @keyframes glassIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* фон — тот же снимок, что и на входе в приложение; CSP пускает только 'self', поэтому без data:-эскиза */
+  .login-root { position: relative; min-height: 100vh; min-height: 100dvh; width: 100%; display: flex;
+                align-items: center; justify-content: center; padding: 16px; overflow: hidden;
+                background: #e9ecf1 url("{{ url_for('static', filename='images/login-bg.jpg') }}") center / cover no-repeat; }
+  @media (max-width: 1280px) { .login-root { background-image: url("{{ url_for('static', filename='images/login-bg-1280.webp') }}"); } }
+  @media (min-width: 1281px) and (max-width: 1920px) { .login-root { background-image: url("{{ url_for('static', filename='images/login-bg-1920.webp') }}"); } }
+  @media (min-width: 1921px) { .login-root { background-image: url("{{ url_for('static', filename='images/login-bg-2560.webp') }}"); } }
+
+  /* полупрозрачная белая вуаль поверх фона */
+  .login-veil { position: absolute; inset: 0; z-index: 1; background: rgba(255,255,255,0.55);
+                backdrop-filter: blur(3px) saturate(120%); -webkit-backdrop-filter: blur(3px) saturate(120%); }
+
+  /* карточка Liquid Glass */
+  .glass { position: relative; z-index: 2; width: 100%; max-width: 380px; padding: 34px 28px 28px;
+           display: flex; flex-direction: column; gap: 22px; border-radius: 28px;
+           background: linear-gradient(160deg, rgba(255,255,255,0.62), rgba(255,255,255,0.38));
+           backdrop-filter: blur(28px) saturate(180%); -webkit-backdrop-filter: blur(28px) saturate(180%);
+           border: 1px solid rgba(255,255,255,0.7);
+           box-shadow: 0 24px 60px rgba(30,40,80,0.18), inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(255,255,255,0.25);
+           animation: glassIn .5s cubic-bezier(.2,.8,.2,1) both; }
+  @media (prefers-reduced-motion: reduce) { .glass { animation: none; } }
+
+  .brand { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+  .brand-row { display: flex; align-items: center; gap: 8px; }
+  .brand h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: #0a0a0a; }
+  .brand p { margin: 0; font-size: 13px; color: rgba(60,60,80,0.65); }
+
+  .flash { margin: 0; padding: 10px 14px; border-radius: 14px; font-size: 13px; font-weight: 500; text-align: center;
+           background: rgba(255,59,48,0.12); border: 1px solid rgba(255,59,48,0.25); color: #c4121e; }
+  .flash.ok { background: rgba(52,199,89,0.14); border-color: rgba(52,199,89,0.3); color: #1c7a3a; }
+
+  .fields { display: flex; flex-direction: column; gap: 14px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 13px; font-weight: 600; color: rgba(40,40,60,0.8); letter-spacing: -0.01em; padding-left: 4px; }
+  .field-wrap { position: relative; display: flex; align-items: center; }
+  .glass-input { width: 100%; height: 46px; padding: 0 18px; border-radius: 15px; font: inherit; font-size: 15px; color: #1d1d1f;
+                 background: rgba(255,255,255,0.55); border: 1px solid rgba(255,255,255,0.75);
+                 box-shadow: inset 0 1px 2px rgba(30,40,80,0.08);
+                 transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
+  .glass-input::placeholder { color: rgba(60,60,80,0.45); }
+  .glass-input:focus { outline: none; background: rgba(255,255,255,0.8); border-color: rgba(70,130,255,0.7);
+                       box-shadow: 0 0 0 4px rgba(70,130,255,0.18), inset 0 1px 2px rgba(30,40,80,0.06); }
+  .glass-input.has-eye { padding-right: 50px; }
+
+  .eye-btn { position: absolute; right: 6px; width: 36px; height: 36px; border: none; border-radius: 12px;
+             background: transparent; cursor: pointer; display: grid; place-items: center; padding: 0;
+             color: rgba(60,60,80,0.6); transition: background .15s ease; }
+  .eye-btn[hidden] { display: none; }
+  .eye-btn:hover { background: rgba(255,255,255,0.6); }
+  .eye-btn:focus-visible { outline: 2px solid rgba(70,130,255,0.7); outline-offset: 1px; }
+  .eye-btn .slash { display: none; }
+  .eye-btn[aria-pressed="true"] .slash { display: inline; }
+
+  .submit-btn { height: 44px; min-width: 150px; padding: 0 28px; align-self: center; border-radius: 15px;
+                border: 1px solid rgba(255,255,255,0.35); font: inherit; font-size: 16px; font-weight: 600; letter-spacing: -0.01em;
+                color: #fff; cursor: pointer;
+                background: linear-gradient(180deg, rgba(70,130,255,0.95), rgba(45,100,235,0.95));
+                box-shadow: 0 10px 24px rgba(45,100,235,0.35), inset 0 1px 0 rgba(255,255,255,0.35);
+                transition: transform .15s ease, box-shadow .15s ease, filter .15s ease; }
+  .submit-btn:hover { filter: brightness(1.06); box-shadow: 0 12px 28px rgba(45,100,235,0.42), inset 0 1px 0 rgba(255,255,255,0.35); }
+  .submit-btn:active { transform: translateY(1px) scale(0.99); }
+  .submit-btn:focus-visible { outline: 3px solid rgba(70,130,255,0.45); outline-offset: 2px; }
+  .submit-btn[disabled] { cursor: wait; filter: saturate(0.7) brightness(0.95); }
+
+  .foot { margin: 0; text-align: center; font-size: 12px; color: rgba(60,60,80,0.55); }
+</style>
+</head>
+<body>
+<div class="login-root">
+  <div class="login-veil"></div>
+
+  <form method="post" class="glass" id="admin-login" novalidate>
     {{ form.hidden_tag() }}
-    <label>{{ form.username.label }} {{ form.username(autocomplete="username", autofocus=true) }}</label>
-    <label>{{ form.password.label }} {{ form.password(autocomplete="current-password") }}</label>
-    <button type="submit" class="primary">Sign in</button>
+
+    <div class="brand">
+      <div class="brand-row">
+        <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="#0a0a0a" aria-hidden="true"><path d="M12.001 1.5c5.858 0 10.7 4.518 10.7 10.2-.001 5.683-4.842 10.2-10.7 10.2-1.785 0-2.96-.555-3.95-1.095-1.876.768-4.02 1.2-6.245-.075l-.885-.505.523-.875c.54-.904.77-1.581.849-2.118.077-.526.02-.98-.11-1.463-.066-.25-.15-.502-.247-.788-.095-.277-.204-.59-.301-.92-.2-.674-.36-1.449-.332-2.39C1.319 6.002 6.153 1.5 12 1.5z"/></svg>
+        <h1>CryptisDchat</h1>
+      </div>
+      <p>Admin panel</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}<p class="flash {{ cat }}" role="alert">{{ msg }}</p>{% endfor %}
+    {% endwith %}
+
+    <div class="fields">
+      <div class="field">
+        {{ form.username.label }}
+        {{ form.username(class="glass-input", autocomplete="username", autofocus=true, placeholder="admin", spellcheck="false", autocapitalize="off") }}
+      </div>
+      <div class="field">
+        {{ form.password.label }}
+        <div class="field-wrap">
+          {{ form.password(class="glass-input has-eye", autocomplete="current-password", placeholder="••••••••") }}
+          <button type="button" class="eye-btn" aria-label="Show password" aria-pressed="false" aria-controls="password" hidden>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2.5 12 C4.8 7.5 8.2 5.2 12 5.2 C15.8 5.2 19.2 7.5 21.5 12 C19.2 16.5 15.8 18.8 12 18.8 C8.2 18.8 4.8 16.5 2.5 12 Z"/>
+              <circle cx="12" cy="12" r="3.2"/>
+              <path class="slash" d="M4 20 L20 4"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="submit-btn">Sign in</button>
+
+    <p class="foot">Access is restricted and every action is logged.</p>
   </form>
 </div>
-{% endblock %}
+<script src="{{ url_for('static', filename='js/admin-login.js') }}"></script>
+</body>
+</html>

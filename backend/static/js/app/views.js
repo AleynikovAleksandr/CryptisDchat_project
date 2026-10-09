@@ -56,11 +56,12 @@ function gateHtml() {
    ============================================================ */
 function sidebarHtml() {
   const s = state;
+  const open = sidebarExpanded();
   const size = props.compact ? 44 : 56;
   const font = props.compact ? 15 : 18;
 
   let head;
-  if (s.sidebarOpen) {
+  if (open) {
     head = '<div class="sb-head" data-mk="head">' +
       '<div class="sb-head__title-slot">' +
         '<div class="sb-title">CryptisDchat</div>' +
@@ -81,7 +82,7 @@ function sidebarHtml() {
 
   let filterMenu = '';
   if (s.filterOpen) {
-    filterMenu = '<div class="filter-menu' + (s.sidebarOpen ? '' : ' is-rail') + '" data-mk="fmenu">' +
+    filterMenu = '<div class="filter-menu' + (open ? '' : ' is-rail') + '" data-mk="fmenu">' +
       ['All', 'Unread', 'Direct', 'Groups'].map((label) =>
         '<div class="filter-row" data-mk="f' + label + '" data-val="' + label + '" data-click="pickFilter">' +
           '<span style="flex:1;">' + label + '</span>' +
@@ -94,7 +95,7 @@ function sidebarHtml() {
   }
 
   let search;
-  if (s.sidebarOpen) {
+  if (open) {
     const active = s.searchFocus || !!s.query;
     search = '<div class="sb-search-wrap" data-mk="searchwrap">' +
       '<div class="sb-search' + (active ? ' is-active' : '') + '" data-click="focusSearch">' +
@@ -119,10 +120,10 @@ function sidebarHtml() {
       (s.filter === 'Direct' && !t.isGroup) || (s.filter === 'Groups' && t.isGroup));
 
   const rows = filtered.map((t) => {
-    const cls = 'thread' + (s.sidebarOpen ? '' : ' is-rail') + (t.id === s.activeThread ? ' is-active' : '');
+    const cls = 'thread' + (open ? '' : ' is-rail') + (t.id === s.activeThread ? ' is-active' : '');
     const typing = s.typing[t.id] && s.typing[t.id].until > Date.now();
     let body = '';
-    if (s.sidebarOpen) {
+    if (open) {
       body = '<div class="thread__body">' +
         '<div class="thread__top">' +
           '<div class="thread__name-wrap">' +
@@ -148,11 +149,11 @@ function sidebarHtml() {
     '</div>';
   }).join('');
 
-  const empty = s.threadsLoaded && !filtered.length && s.sidebarOpen
+  const empty = s.threadsLoaded && !filtered.length && open
     ? '<div class="sb-empty" data-mk="sbempty">' + (s.threads.length ? 'Nothing found.' : 'No conversations yet.') + '</div>'
     : '';
-  const conn = s.connection !== 'online' && s.sidebarOpen
-    ? '<div class="sb-conn" data-mk="conn">Reconnecting…</div>' : '';
+  const conn = s.connection !== 'online' && open
+    ? '<div class="sb-conn" data-mk="conn"><div class="gate-spinner gate-spinner--sm"></div><span>Reconnecting…</span></div>' : '';
 
   return head + filterMenu + search + conn + '<div class="sb-list" data-mk="list">' + rows + empty + '</div>';
 }
@@ -482,12 +483,18 @@ function messagesHtml() {
       out += '<div class="chat-day" data-mk="day' + m.id + '">' + esc(day) + '</div>';
     }
 
-    if (t.isGroup && !m.mine) {
-      out += '<div class="msg-author" data-mk="au' + m.id + '">' + esc(memberName(s.activeThread, m.senderId) || 'Member') + '</div>';
+    // в группе у чужого сообщения — имя автора над пузырём и его аватар слева
+    const inGroup = t.isGroup && !m.mine;
+    let authorAv = '';
+    if (inGroup) {
+      const u = memberOf(s.activeThread, m.senderId);
+      const name = (u && u.display_name) || 'Member';
+      out += '<div class="msg-author" data-mk="au' + m.id + '">' + esc(name) + '</div>';
+      authorAv = avatarHtml(32, (u && u.avatar_tint) || '#8899a6', 12, initialsOf(name), u && u.avatar_url, null, 'msg-row__av');
     }
 
     if (m.reply) {
-      out += '<div class="reply-wrap' + (m.mine ? ' is-mine' : '') + '" data-mk="rw' + m.id + '"' +
+      out += '<div class="reply-wrap' + (m.mine ? ' is-mine' : '') + (inGroup ? ' has-av' : '') + '" data-mk="rw' + m.id + '"' +
         ' data-reply-id="' + esc(m.reply.id) + '" data-click="jumpToReply">' +
         '<div class="reply-head">' + I.replyArrow + '<span>' + esc(m.reply.name) + '</span></div>' +
         '<div class="reply-body">' +
@@ -536,7 +543,7 @@ function messagesHtml() {
     }
 
     out += '<div class="msg-row' + (m.mine ? ' is-mine' : '') + '" data-mk="m' + m.id + '" data-msg-id="' + m.id + '"' +
-      ' data-mouseenter="hoverMsg" data-mouseleave="unhoverMsg">' + actions + content + '</div>';
+      ' data-mouseenter="hoverMsg" data-mouseleave="unhoverMsg">' + authorAv + actions + content + '</div>';
 
     return out;
   }).join('');
@@ -589,7 +596,7 @@ function composerHtml() {
     ? '<div class="md-preview md" data-mk="mdpreview">' + CX.md.render(s.draft) + '</div>'
     : '';
 
-  return '<div class="composer' + (s.sidebarOpen ? '' : ' is-rail') + '" data-mk="composer">' +
+  return '<div class="composer' + (sidebarExpanded() ? '' : ' is-rail') + '" data-mk="composer">' +
     '<button class="comp-btn comp-attach" type="button" title="Add attachment" data-click="pickFiles">' + I.plus + '</button>' +
     '<button class="comp-btn comp-emoji" type="button" title="Emoji" data-click="noop">' + I.emoji + '</button>' +
     '<div class="comp-field">' +
@@ -644,12 +651,13 @@ function chatHtml() {
   return '<div class="chat" data-mk="chat">' +
     '<div class="chat-head">' +
       '<div class="chat-head__blur"></div>' +
+      '<button class="chat-head__back" type="button" title="Back" data-click="backToList">' + I.back + '</button>' +
       '<div class="chat-head__peer" data-click="openProfile">' +
         avatarHtml(36, peer.tint, 14, peer.initials, peer.avatarUrl) +
-        '<div><div class="chat-head__name">' + esc(peer.name) + '</div>' +
+        '<div class="chat-head__title"><div class="chat-head__name">' + esc(peer.name) + '</div>' +
         (sub ? '<div class="chat-head__sub' + (!peer.isGroup && peer.online && sub === 'online' ? ' is-online' : '') + '">' + esc(sub) + '</div>' : '') + '</div>' +
       '</div>' +
-      '<div style="flex:1;"></div>' +
+      '<div class="chat-head__spacer"></div>' +
       '<button class="chat-head__more" type="button" title="Profile settings" data-click="openProfile">' + I.dots + '</button>' +
     '</div>' +
     '<div class="chat-fade"></div>' +

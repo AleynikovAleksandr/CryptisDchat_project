@@ -9,9 +9,10 @@ import re
 
 import pytest
 from sqlalchemy import event, func, select, text
+from werkzeug.security import generate_password_hash
 
 from admin_app import create_app, db
-from admin_app.commands import upsert_admin
+from admin_app.commands import deactivate_other_admins, upsert_admin
 from app.config import get_settings
 from app.models import (
     AdminAuditLog,
@@ -62,6 +63,19 @@ def test_login_requires_csrf_and_valid_password(admin_client):
     r = sign_in(admin_client)
     assert r.status_code == 302 and r.headers["Location"].endswith("/admin/")
     assert admin_client.get("/admin/").status_code == 200
+
+
+def test_admin_from_password_hash_replaces_old_login(admin_client):
+    """ADMIN_PASSWORD_HASH: пароль не хранится открытым текстом; старый логин после смены не работает."""
+    with admin_client.flask_app.app_context():
+        with pytest.raises(ValueError):
+            upsert_admin("ops", password_hash="1234567")  # не хеш — отказ
+        upsert_admin("ops", password_hash=generate_password_hash("1234567"))
+        assert deactivate_other_admins("ops") == 1
+    assert "Invalid" in sign_in(admin_client).get_data(as_text=True)  # root отключён
+    token = csrf(admin_client, "/admin/login")
+    r = admin_client.post("/admin/login", data={"csrf_token": token, "username": "ops", "password": "1234567"})
+    assert r.status_code == 302 and r.headers["Location"].endswith("/admin/")
 
 
 def test_lockout_after_failed_attempts(admin_client):

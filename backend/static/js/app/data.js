@@ -373,10 +373,15 @@ async function refreshPreview(t, raw) {
   render();
 }
 
-function memberName(threadId, userId) {
+function memberOf(threadId, userId) {
   const members = state.members[threadId];
   const m = members && members.find((x) => x.user.id === userId);
-  return m ? m.user.display_name : '';
+  return m ? m.user : null;
+}
+
+function memberName(threadId, userId) {
+  const u = memberOf(threadId, userId);
+  return u ? u.display_name : '';
 }
 
 async function loadMembers(threadId) {

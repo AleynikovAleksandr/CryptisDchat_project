@@ -111,6 +111,7 @@ function patch(container, html) {
 const elSidebar = document.getElementById('sidebar');
 const elMain = document.getElementById('main');
 const elOverlays = document.getElementById('overlays');
+const elApp = document.querySelector('.app');
 
 /* Удаление поля в фокусе заставляет браузер синхронно послать blur,
    его обработчик вызывает setState — и отрисовка запускается заново
@@ -124,7 +125,8 @@ function render() {
   try {
     // пока приложение заблокировано (PIN) — только экран ввода кода, без списка чатов
     elSidebar.hidden = !!state.gate;
-    elSidebar.classList.toggle('is-collapsed', !state.sidebarOpen);
+    elSidebar.classList.toggle('is-collapsed', !sidebarExpanded());
+    elApp.classList.toggle('show-main', showsMain());
     if (!state.gate) patch(elSidebar, sidebarHtml());
     patch(elMain, state.gate ? gateHtml() : mainHtml());
     patch(elOverlays, overlaysHtml());
@@ -137,6 +139,27 @@ function render() {
     if (pin && document.activeElement !== pin) pin.focus();
   }
 }
+
+bindLongPress(elMain);
+
+/* Экранная клавиатура: iOS не уменьшает 100dvh, а сдвигает страницу. На телефоне высота
+ * приложения берётся из visualViewport, чтобы композер оставался прямо над клавиатурой. */
+const vv = window.visualViewport;
+function syncViewport() {
+  if (!vv || !isMobile()) {
+    document.documentElement.style.removeProperty('--app-h');
+    document.documentElement.classList.remove('kb-open');
+    return;
+  }
+  document.documentElement.style.setProperty('--app-h', Math.round(vv.height) + 'px');
+  // клавиатура открыта — отступ под полосу «домой» не нужен, композер прижимается к клавиатуре
+  document.documentElement.classList.toggle('kb-open', vv.height < window.innerHeight - 120);
+  if (window.scrollY) window.scrollTo(0, 0);
+}
+if (vv) { vv.addEventListener('resize', syncViewport); vv.addEventListener('scroll', syncViewport); }
+syncViewport();
+// переход через границу 768px (поворот, изменение окна) меняет раскладку
+MOBILE_MQ.addEventListener('change', () => { syncViewport(); render(); });
 
 document.getElementById('dc-file-input').addEventListener('change', H.onFiles);
 document.getElementById('dc-avatar-input').addEventListener('change', H.onAvatarFile);

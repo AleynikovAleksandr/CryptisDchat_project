@@ -14,9 +14,9 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY backend/requirements.txt /tmp/req/backend/requirements.txt
-COPY worker/requirements.txt /tmp/req/worker/requirements.txt
-RUN pip install -r /tmp/req/worker/requirements.txt
+# те же зависимости, что у backend, из общего pyproject.toml
+COPY pyproject.toml README.md LICENSE /tmp/project/
+RUN pip install "/tmp/project[backend]" && rm -rf /tmp/project
 
 # /app/app — модели и сервисы, /app/worker — задачи Celery
 COPY backend/ /app/
