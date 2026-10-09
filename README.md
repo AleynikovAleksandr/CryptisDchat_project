@@ -107,15 +107,15 @@ Application containers run as the user who started the script (`id -u`/`id -g`),
 | [https://85.95.150.8:3444/admin/](https://85.95.150.8:3444/admin/) | Flask admin panel (login in `.env` `ADMIN_USERNAME`; the password is stored only as a hash in `ADMIN_PASSWORD_HASH`, made with `flask --app admin_app.wsgi hash-password`) |
 | `http://localhost:3890` / `http://localhost:3891/admin/` | the same over an SSH / VS Code port forward |
 
-**HTTPS with a self-signed certificate.** Browsers enable Web Crypto (`crypto.subtle`) only over HTTPS or on
-`localhost`, so over plain `http://<IP>:3890` sign-in cannot work. The `caddy` container
-([`caddy/Caddyfile`](caddy/Caddyfile)) serves HTTPS on `HTTPS_APP_PORT` (3443 → `backend`) and
-`HTTPS_ADMIN_PORT` (3444 → `admin`) with a certificate from Caddy's own local CA for `HTTPS_HOST`
-(the server's IP or hostname, set in `.env`), valid for 180 days. The browser shows a "not secure" warning once
-per certificate — click "Advanced → Proceed". To remove the warning on your own devices, install the CA root:
-`docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./cryptis-root.crt` and add it to the
-system trust store. The CA lives in the `caddy_data` volume, so it survives restarts. For a real domain,
-replace this with a publicly trusted certificate.
+**HTTPS with a public Let's Encrypt certificate for the IP address.** Browsers enable Web Crypto
+(`crypto.subtle`) only over HTTPS or on `localhost`, so over plain `http://<IP>:3890` sign-in cannot work.
+The `caddy` container ([`caddy/Caddyfile`](caddy/Caddyfile), Caddy 2.11.4) serves HTTPS on `HTTPS_APP_PORT`
+(3443 → `backend`) and `HTTPS_ADMIN_PORT` (3444 → `admin`) with a certificate that Let's Encrypt issues
+directly for the IP in `HTTPS_HOST` — browsers trust it, no warning. Let's Encrypt issues IP certificates only
+with the `shortlived` profile (valid ~6 days); Caddy renews them automatically through the ACME HTTP-01
+challenge, so **port 80 must stay reachable from the internet** and must not be taken by another program
+(`scripts/run_gunicorn.sh check` verifies that). `https://localhost:3443/3444` (SSH / VS Code port forward)
+keeps a certificate from Caddy's local CA.
 
 The current `.env` is set up for a local run (sign-in with the dev wallet). For a production server change
 4 lines in `.env`: `APP_ENV=production`, `DEV_WALLET_LOGIN=false`, and set `PUBLIC_ORIGIN` /

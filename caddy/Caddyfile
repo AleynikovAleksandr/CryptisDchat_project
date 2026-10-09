@@ -1,32 +1,33 @@
-# HTTPS с самоподписанным сертификатом (внутренний CA Caddy, без Let's Encrypt и без домена).
+# HTTPS с публичным сертификатом Let's Encrypt прямо на IP-адрес (без домена).
 # Web Crypto (crypto.subtle) браузер даёт только на HTTPS или localhost, поэтому по внешнему
-# адресу приложение работает только через этот вход. Браузер предупредит «подключение не
-# защищено» — один раз согласиться, либо установить корневой сертификат (см. README).
+# адресу приложение работает только через этот вход.
 #
 #   :3443 → backend (приложение, API, WebSocket)      :3444 → admin (Flask-панель)
+#   :80   → только проверка ACME HTTP-01: Let's Encrypt подтверждает, что IP наш
+#
+# Сертификат на IP Let's Encrypt выдаёт только с профилем shortlived — он живёт ~6 дней (160 ч),
+# Caddy продлевает его сам заранее. Порт 80 должен быть открыт из интернета постоянно, иначе
+# продление не пройдёт и через несколько дней браузер снова предупредит о сертификате.
 # HTTPS_HOST — внешний IP или имя сервера (.env); localhost — для проброса портов через SSH/VS Code.
 {
-	local_certs
-	skip_install_trust
+	# порт 80 занят только проверкой ACME, перенаправлений http → https там нет
 	auto_https disable_redirects
 	# браузеры не отправляют SNI для IP-адресов — без этого Caddy не выберет сертификат
 	default_sni {$HTTPS_HOST}
 	admin off
-	# браузер запоминает согласие с предупреждением для конкретного сертификата — выпускаем его
-	# на долгий срок (по умолчанию 12 ч), иначе предупреждение возвращалось бы несколько раз в сутки
-	pki {
-		ca local {
-			intermediate_lifetime 400d
+}
+
+(public_cert) {
+	tls {
+		issuer acme {
+			profile shortlived
+			# TLS-ALPN-01 требует порт 443; проверка идёт через HTTP-01 на порту 80
+			disable_tlsalpn_challenge
 		}
 	}
 }
 
-https://{$HTTPS_HOST}:3443, https://localhost:3443 {
-	tls {
-		issuer internal {
-			lifetime 180d
-		}
-	}
+(app) {
 	reverse_proxy {$APP_UPSTREAM:backend:8000} {
 		transport http {
 			# простаивающее соединение к backend закрываем раньше, чем его закроет Gunicorn (keepalive 75)
@@ -36,11 +37,27 @@ https://{$HTTPS_HOST}:3443, https://localhost:3443 {
 	}
 }
 
-https://{$HTTPS_HOST}:3444, https://localhost:3444 {
-	tls {
-		issuer internal {
-			lifetime 180d
-		}
-	}
+(admin_panel) {
 	reverse_proxy {$ADMIN_UPSTREAM:admin:8001}
+}
+
+https://{$HTTPS_HOST}:3443 {
+	import public_cert
+	import app
+}
+
+https://{$HTTPS_HOST}:3444 {
+	import public_cert
+	import admin_panel
+}
+
+# localhost публичный сертификат получить не может — для проброса портов остаётся внутренний CA Caddy
+https://localhost:3443 {
+	tls internal
+	import app
+}
+
+https://localhost:3444 {
+	tls internal
+	import admin_panel
 }

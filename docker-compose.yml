@@ -137,10 +137,12 @@ services:
     networks:
       - cryptis_network
 
-  # HTTPS-вход с самоподписанным сертификатом: без него браузер по http://<IP> отключает
-  # Web Crypto и вход не работает (caddy/Caddyfile). Сертификаты и CA — в томе caddy_data.
+  # HTTPS-вход с публичным сертификатом Let's Encrypt на IP (профиль shortlived, caddy/Caddyfile):
+  # без HTTPS браузер по http://<IP> отключает Web Crypto и вход не работает.
+  # Сертификаты и учётная запись ACME — в томе caddy_data. Версия закреплена: IP-сертификаты
+  # в Caddy исправлены весной 2026 (caddyserver/caddy#7399).
   caddy:
-    image: caddy:2
+    image: caddy:2.11.4
     container_name: cryptis_caddy
     restart: unless-stopped
     environment:
@@ -159,6 +161,8 @@ services:
       - backend
       - admin
     ports:
+      # 80 — только проверка ACME HTTP-01 при выдаче и продлении сертификата (каждые несколько дней)
+      - "80:80"
       - "${HTTPS_APP_PORT:-3443}:3443"
       - "${HTTPS_ADMIN_PORT:-3444}:3444"
     networks:

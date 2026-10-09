@@ -17,7 +17,7 @@
 #   4. этап 2 — приложение:
 #        backend — Gunicorn + UvicornWorker: FastAPI, WebSocket, Login.html/cryptis.html  (:3890)
 #        admin   — Gunicorn + gthread: Flask-админка и вебхуки                             (:3891)
-#        caddy   — HTTPS с самоподписанным сертификатом: приложение :3443, админка :3444
+#        caddy   — HTTPS с сертификатом Let's Encrypt на IP: приложение :3443, админка :3444 (:80 — проверка ACME)
 #        worker, worker_fast, beat — Celery;
 #   5. ждёт, пока backend ответит на /healthz, и проверяет, что работают ВСЕ 11 контейнеров —
 #      если какой-то упал, показывает его логи;
@@ -126,7 +126,8 @@ check_ports() {
   fi
   local ours busy=() p owner v
   ours="$(compose ps -q 2>/dev/null || true)"
-  local ports=("$(v="$(env_value DB_EXTERNAL_PORT || true)"; echo "${v:-3307}")" 3890 3891 6390 8096
+  # 80 — проверка ACME (Let's Encrypt) для сертификата Caddy
+  local ports=(80 "$(v="$(env_value DB_EXTERNAL_PORT || true)"; echo "${v:-3307}")" 3890 3891 6390 8096
                "$(v="$(env_value HTTPS_APP_PORT || true)"; echo "${v:-3443}")"
                "$(v="$(env_value HTTPS_ADMIN_PORT || true)"; echo "${v:-3444}")")
   for p in "${ports[@]}"; do
