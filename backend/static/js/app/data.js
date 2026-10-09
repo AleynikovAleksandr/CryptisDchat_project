@@ -35,7 +35,9 @@ function vaultState() {
 }
 const persist = (immediate) => VAULT.save(vaultState(), immediate);
 
-API.session.onRefresh = () => { persist(); CX.ws.reauth(); };
+// новый refresh-токен записываем сразу, без дебаунса: старый уже погашен сервером, и перезагрузка
+// страницы до записи оставила бы в хранилище только его — повторное предъявление = отзыв сессии
+API.session.onRefresh = async () => { await persist(true); CX.ws.reauth(); };
 API.session.onExpired = () => sessionEnded();
 
 async function importKeys() {
@@ -198,6 +200,7 @@ let expireTimer = null;
 async function startApp() {
   setState({ gate: null, view: 'chat' });
   await Promise.all([loadMe(), loadSettings(), loadThreads(), loadBlocked()]).catch((e) => showToast(errorText(e)));
+  routeStart(); // открыть экран из адреса: /app/settings, /app/chat/<id> …
   CX.ws.start({ onFrame: onWsFrame, onRevoked: sessionEnded, onReconnecting: () => set({ connection: 'reconnecting' }) });
   startAutolock();
   clearInterval(expireTimer);
@@ -206,6 +209,7 @@ async function startApp() {
 }
 
 function wipeMemory() {
+  router.armed = false; // до разблокировки адрес не трогаем — после неё routeStart вернёт тот же экран
   CX.ws.stop();
   clearInterval(expireTimer);
   VAULT.lock();

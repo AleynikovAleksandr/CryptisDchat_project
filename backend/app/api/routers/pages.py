@@ -22,7 +22,10 @@ async def login_page() -> FileResponse:
 
 
 @router.get("/app")
-async def app_page() -> FileResponse:
+@router.get("/app/{screen:path}")
+async def app_page(screen: str = "") -> FileResponse:
+    """Каждый экран клиента — свой адрес (/app/settings, /app/new-message, /app/chat/<id>);
+    страница одна, нужный экран по адресу выбирает static/js/app/router.js."""
     return FileResponse(TEMPLATES / "cryptis.html", media_type="text/html")
 
 

@@ -1,5 +1,17 @@
 # Образ backend: FastAPI (API + WebSocket + Login.html/cryptis.html) и Flask-админка.
 # Собирается из корня проекта: docker build -f backend/Dockerfile .
+
+# --- этап 1: клиент — все скрипты страницы в один минифицированный файл, без source map ---
+FROM node:22-alpine AS frontend
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY scripts/build_frontend.mjs scripts/
+COPY backend/templates backend/templates
+COPY backend/static/js backend/static/js
+RUN node scripts/build_frontend.mjs --out /build/out
+
+# --- этап 2: Python ---
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -14,6 +26,10 @@ COPY pyproject.toml README.md LICENSE /tmp/project/
 RUN pip install "/tmp/project[backend]" && rm -rf /tmp/project
 
 COPY backend/ /app/
+# исходники JS в образ не попадают: страницы подключают только static/dist/<страница>.<хеш>.js
+RUN rm -rf /app/static/js
+COPY --from=frontend /build/out/static/ /app/static/
+COPY --from=frontend /build/out/templates/ /app/templates/
 
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --no-create-home app \
  && mkdir -p /app/uploads /app/data_warehouses/gunicorn \

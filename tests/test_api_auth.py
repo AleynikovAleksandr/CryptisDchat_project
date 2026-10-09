@@ -179,3 +179,13 @@ async def test_security_headers_on_pages(client):
     assert r.headers["x-frame-options"] == "DENY"
     r = await client.get("/app")
     assert r.status_code == 200
+
+
+async def test_app_screens_have_own_urls(client):
+    """Каждый экран — свой адрес; страница одна и та же, экран выбирает static/js/app/router.js."""
+    for path in ("/app/settings", "/app/settings/sessions", "/app/new-message", "/app/new-group",
+                 "/app/chat/9f10303c-4fc7-4a73-8f4e-cafb4a8eebc9"):
+        r = await client.get(path)
+        assert r.status_code == 200, path
+        assert "/static/js/app/router.js" in r.text, path
+        assert r.headers["x-frame-options"] == "DENY", path

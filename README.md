@@ -148,6 +148,21 @@ three realm services, Celery worker + beat, the Flask admin panel and FastAPI. T
 verifies the `ton_proof` signature). [http://localhost:3890/login?dev=new](http://localhost:3890/login?dev=new) creates another test user.
 Admin panel: [http://127.0.0.1:3891/admin/](http://127.0.0.1:3891/admin/), `admin` / `devpassword123`.
 
+### Client build (minified JavaScript)
+
+The `backend` image does not ship the readable JS sources. Its first stage (`node:22-alpine`) runs
+[`scripts/build_frontend.mjs`](scripts/build_frontend.mjs) with esbuild (pinned in `package.json`): all
+`<script src="/static/js/…">` tags of `login.html` and `cryptis.html` are concatenated into one minified
+`static/dist/<page>.<hash>.js` without comments or source maps, and `static/js/` is removed from the image.
+The local dev server keeps using the sources. To check the build locally:
+
+```bash
+npm ci && node scripts/build_frontend.mjs --out /tmp/cryptis-build
+```
+
+This only makes the code harder to read — anything the browser runs is visible in DevTools. Security relies on
+end-to-end encryption and server-side checks, not on hiding the client.
+
 ### Tests
 
 ```bash
@@ -414,6 +429,7 @@ Binary `WsFrame` frames (`proto/cryptis.proto`); the first frame is `auth` with 
 |---|---|---|
 | GET | `/login` | Sign-in screen (`Login.html`) |
 | GET | `/app` | Messenger (`cryptis.html`) |
+| GET | `/app/…` | The same page; each screen has its own URL: `/app/chat/<id>`, `/app/new-message`, `/app/new-group`, `/app/settings`, `/app/settings/{sessions,autolock,blocked,group-invites,passcode}` |
 | GET | `/tonconnect-manifest.json` | TonConnect manifest |
 | GET | `/healthz` | Liveness check |
 

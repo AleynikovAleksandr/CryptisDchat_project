@@ -54,6 +54,7 @@ function setState(patch) {
   render();
   if (prevDraft !== state.draft && !state.draft) hardResetDraft();
   prevDraft = state.draft;
+  routeSync(); // адрес в строке браузера следует за экраном (router.js)
 }
 const set = (patch) => setState(patch);
 
