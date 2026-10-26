@@ -1,41 +1,46 @@
 {% extends "admin/base.html" %}
 {% block title %}{{ user.display_name }}{% endblock %}
 {% block content %}
-<h1>{{ user.display_name or 'User' }} {% if user.is_suspended %}<span class="pill bad">suspended</span>{% endif %}</h1>
-<div class="row">
+<div class="page-head">
+  <div class="page-head__copy"><p class="page-kicker">User account</p><h1>{{ user.display_name or 'User' }} {% if user.is_suspended %}<span class="pill bad">suspended</span>{% endif %}</h1>
+    <p class="page-intro">Account identity, devices, sessions and administrative actions.</p></div>
+</div>
+<div class="detail-grid">
   <div class="card">
-    <div class="muted">UUID</div><div class="mono">{{ user.id }}</div>
-    <div class="muted" style="margin-top:8px;">Username</div><div>{{ '@' ~ user.username if user.username else '—' }}</div>
-    <div class="muted" style="margin-top:8px;">Created</div><div class="mono">{{ user.created_at }}</div>
-    <div class="muted" style="margin-top:8px;">Sessions revoked at</div><div class="mono">{{ user.sessions_revoked_at or '—' }}</div>
-    {% if user.is_suspended %}<div class="muted" style="margin-top:8px;">Reason</div><div>{{ user.suspended_reason }}</div>{% endif %}
+    <div class="detail-list">
+      <div class="detail-item"><div class="detail-label">UUID</div><div class="detail-value mono">{{ user.id }}</div></div>
+      <div class="detail-item"><div class="detail-label">Username</div><div class="detail-value">{{ '@' ~ user.username if user.username else '—' }}</div></div>
+      <div class="detail-item"><div class="detail-label">Created</div><div class="detail-value mono">{{ user.created_at }}</div></div>
+      <div class="detail-item"><div class="detail-label">Sessions revoked at</div><div class="detail-value mono">{{ user.sessions_revoked_at or '—' }}</div></div>
+      {% if user.is_suspended %}<div class="detail-item"><div class="detail-label">Reason</div><div class="detail-value">{{ user.suspended_reason }}</div></div>{% endif %}
+    </div>
   </div>
   <div class="card">
-    <h2 style="margin-top:0;">Actions</h2>
-    <form method="post" action="{{ url_for('admin.revoke_sessions', uuid=user.id) }}" style="margin-bottom:12px;">
-      {{ action_form.hidden_tag() }}
-      <button type="submit">Revoke all sessions</button>
-      <div class="muted" style="margin-top:4px;">Deletes every refresh token; open sessions receive <code>session.revoked</code>.</div>
-    </form>
+    <h2 class="card-title">Actions</h2>
+    <div class="action-stack">
+    <div class="action-block"><form method="post" action="{{ url_for('admin.revoke_sessions', uuid=user.id) }}">
+      {{ action_form.hidden_tag() }}<button type="submit">Revoke all sessions</button>
+    </form><div class="action-help">Deletes every refresh token; open sessions receive <code>session.revoked</code>.</div></div>
     {% if user.is_suspended %}
-    <form method="post" action="{{ url_for('admin.unsuspend', uuid=user.id) }}">
+    <div class="action-block"><form method="post" action="{{ url_for('admin.unsuspend', uuid=user.id) }}">
       {{ action_form.hidden_tag() }}<button type="submit" class="primary">Restore account</button>
-    </form>
+    </form></div>
     {% else %}
-    <form method="post" action="{{ url_for('admin.suspend', uuid=user.id) }}" style="display:flex;gap:8px;">
+    <div class="action-block"><form method="post" action="{{ url_for('admin.suspend', uuid=user.id) }}" class="action-row">
       {{ suspend_form.hidden_tag() }}
       {{ suspend_form.reason(placeholder="Reason for suspension") }}
       <button type="submit" class="danger">Suspend</button>
-    </form>
+    </form></div>
     {% endif %}
-    <div style="margin-top:14px;padding-top:14px;border-top:1px solid hsl(200 19% 92%);">
+    <div class="action-block">
       <a class="btn danger" href="{{ url_for('admin.delete_user_view', uuid=user.id) }}">Delete user…</a>
-      <div class="muted" style="margin-top:4px;">Permanently removes the account and all its data.</div>
+      <div class="action-help">Permanently removes the account and all its data.</div>
+    </div>
     </div>
   </div>
 </div>
 
-<h2>TON wallets</h2>
+<div class="section-title"><h2>TON wallets</h2></div>
 <div class="table-wrap"><table>
   <tr><th>Address</th><th>Raw</th><th>Network</th><th>Primary</th><th>Linked</th></tr>
   {% for w in wallets %}
@@ -44,7 +49,7 @@
   {% endfor %}
 </table></div>
 
-<h2>Devices</h2>
+<div class="section-title"><h2>Devices</h2></div>
 <div class="table-wrap"><table>
   <tr><th>Device</th><th>IP</th><th>Created</th><th>Last seen</th><th>Status</th></tr>
   {% for d in devices %}
@@ -54,7 +59,7 @@
   {% else %}<tr><td colspan="5" class="muted">No devices.</td></tr>{% endfor %}
 </table></div>
 
-<h2>Refresh tokens</h2>
+<div class="section-title"><h2>Refresh tokens</h2></div>
 <div class="table-wrap"><table>
   <tr><th>Token id</th><th>Device</th><th>Created</th><th>Expires</th><th>Status</th></tr>
   {% for t in tokens %}

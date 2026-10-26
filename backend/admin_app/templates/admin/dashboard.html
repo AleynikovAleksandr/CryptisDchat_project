@@ -1,22 +1,25 @@
 {% extends "admin/base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
+<div class="page-head">
+  <div class="page-head__copy"><p class="page-kicker">Overview</p><h1>Dashboard</h1>
+    <p class="page-intro">Live account, messaging, moderation and TON delivery status.</p></div>
+</div>
 <div class="grid">
-  <div class="card"><div class="muted">Users</div><div class="stat">{{ m.users_total }}</div>
-    <div class="muted">{{ m.users_suspended }} suspended</div></div>
-  <div class="card"><div class="muted">Messages, 24h</div><div class="stat">{{ m.messages_24h }}</div>
-    <div class="muted">{{ m.threads_total }} conversations</div></div>
-  <div class="card"><div class="muted">Hashes waiting for batch</div><div class="stat">{{ m.chain_events_queued }}</div>
-    <div class="muted">Redis queue: {{ m.chain_pending_redis }}</div></div>
-  <div class="card"><div class="muted">TON batches</div><div class="stat">{{ m.batches.confirmed }}</div>
-    <div class="muted">{{ m.batches.submitted }} submitted · {{ m.batches.pending }} pending ·
-      <span style="color:{{ '#c4121e' if m.batches.failed else 'inherit' }}">{{ m.batches.failed }} failed</span></div></div>
-  <div class="card"><div class="muted">Open reports</div><div class="stat">{{ m.open_reports }}</div>
-    <div class="muted"><a href="{{ url_for('admin.reports') }}">Review →</a></div></div>
+  <div class="card metric-card"><div class="metric-label">Users</div><div class="stat metric-value">{{ m.users_total }}</div>
+    <div class="metric-sub">{{ m.users_suspended }} suspended</div></div>
+  <div class="card metric-card"><div class="metric-label">Messages, 24h</div><div class="stat metric-value">{{ m.messages_24h }}</div>
+    <div class="metric-sub">{{ m.threads_total }} conversations</div></div>
+  <div class="card metric-card"><div class="metric-label">Hashes waiting for batch</div><div class="stat metric-value">{{ m.chain_events_queued }}</div>
+    <div class="metric-sub">Redis queue: {{ m.chain_pending_redis }}</div></div>
+  <div class="card metric-card {{ 'metric-card--danger' if m.batches.failed }}"><div class="metric-label">TON batches</div><div class="stat metric-value">{{ m.batches.confirmed }}</div>
+    <div class="metric-sub">{{ m.batches.submitted }} submitted · {{ m.batches.pending }} pending ·
+      <span class="{{ 'danger-text' if m.batches.failed }}">{{ m.batches.failed }} failed</span></div></div>
+  <div class="card metric-card"><div class="metric-label">Open reports</div><div class="stat metric-value">{{ m.open_reports }}</div>
+    <div class="metric-sub"><a href="{{ url_for('admin.reports') }}">Review →</a></div></div>
 </div>
 
-<h2>Recent admin actions</h2>
+<div class="section-title"><h2>Recent admin actions</h2></div>
 <div class="table-wrap">
 <table>
   <tr><th>Time (UTC)</th><th>Admin</th><th>Action</th><th>Target</th><th>IP</th></tr>

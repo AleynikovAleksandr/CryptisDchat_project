@@ -1,10 +1,11 @@
 {% extends "admin/base.html" %}
 {% block title %}Reports{% endblock %}
 {% block content %}
-<h1>Reports</h1>
-<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+<div class="page-head"><div class="page-head__copy"><p class="page-kicker">Moderation</p><h1>Reports</h1>
+  <p class="page-intro">Review account-level reports and record moderation outcomes.</p></div></div>
+<div class="filter-tabs" aria-label="Report status">
   {% for s in ['open', 'in_review', 'resolved', 'rejected', 'all'] %}
-  <a class="pill {{ 'ok' if s == status }}" href="{{ url_for('admin.reports', status=s) }}">{{ s.replace('_', ' ') }}</a>
+  <a class="pill filter-tab {{ 'on' if s == status }}" href="{{ url_for('admin.reports', status=s) }}"{% if s == status %} aria-current="page"{% endif %}>{{ s.replace('_', ' ') }}</a>
   {% endfor %}
 </div>
 <div class="table-wrap"><table>

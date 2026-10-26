@@ -1,6 +1,8 @@
 {% extends "admin/base.html" %}
 {% block title %}Not found{% endblock %}
 {% block content %}
-<h1>Not found</h1>
-<p class="muted">The requested record does not exist. <a href="{{ url_for('admin.dashboard') }}">Back to dashboard</a></p>
+<div class="empty-state">
+  <p class="page-kicker">404</p><h1>Not found</h1>
+  <p class="muted">The requested record does not exist. <a href="{{ url_for('admin.dashboard') }}">Back to dashboard</a></p>
+</div>
 {% endblock %}

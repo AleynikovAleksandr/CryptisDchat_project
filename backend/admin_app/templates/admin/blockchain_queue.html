@@ -1,17 +1,18 @@
 {% extends "admin/base.html" %}
 {% block title %}Blockchain queue{% endblock %}
 {% block content %}
-<h1>TON write queue</h1>
-<p class="muted">Message hashes are batched into a Merkle tree; one transaction from the service wallet anchors each root.
-  Failed batches stop auto-retrying after 5 attempts and wait for a manual retry here.</p>
-<div class="grid" style="margin-bottom:8px;">
-  <div class="card"><div class="muted">Waiting for batch</div><div class="stat">{{ m.chain_events_queued }}</div></div>
-  <div class="card"><div class="muted">Pending</div><div class="stat">{{ m.batches.pending }}</div></div>
-  <div class="card"><div class="muted">Submitted</div><div class="stat">{{ m.batches.submitted }}</div></div>
-  <div class="card"><div class="muted">Failed</div><div class="stat" style="color:{{ '#c4121e' if m.batches.failed else 'inherit' }}">{{ m.batches.failed }}</div></div>
+<div class="page-head">
+  <div class="page-head__copy"><p class="page-kicker">TON operations</p><h1>TON write queue</h1>
+    <p class="page-intro">Message hashes are batched into a Merkle tree; one transaction from the service wallet anchors each root. Failed batches stop auto-retrying after 5 attempts and wait for a manual retry here.</p></div>
+</div>
+<div class="grid">
+  <div class="card metric-card"><div class="metric-label">Waiting for batch</div><div class="stat metric-value">{{ m.chain_events_queued }}</div></div>
+  <div class="card metric-card"><div class="metric-label">Pending</div><div class="stat metric-value">{{ m.batches.pending }}</div></div>
+  <div class="card metric-card"><div class="metric-label">Submitted</div><div class="stat metric-value">{{ m.batches.submitted }}</div></div>
+  <div class="card metric-card {{ 'metric-card--danger' if m.batches.failed }}"><div class="metric-label">Failed</div><div class="stat metric-value">{{ m.batches.failed }}</div></div>
 </div>
 
-<h2>Batches in progress</h2>
+<div class="section-title"><h2>Batches in progress</h2></div>
 <div class="table-wrap"><table>
   <tr><th>Created</th><th>Merkle root</th><th>Leaves</th><th>Status</th><th>Attempts</th><th>Last error</th><th></th></tr>
   {% for b in batches %}
@@ -19,7 +20,7 @@
     <td class="mono">{{ b.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
     <td class="mono">{{ b.merkle_root[:20] }}…</td><td>{{ b.leaf_count }}</td>
     <td><span class="pill {{ 'bad' if b.status == 'failed' else 'warn' }}">{{ b.status }}</span></td>
-    <td>{{ b.attempts }}</td><td class="mono" style="max-width:320px;">{{ (b.last_error or '')[:200] }}</td>
+    <td>{{ b.attempts }}</td><td class="mono error-cell">{{ (b.last_error or '')[:200] }}</td>
     <td>{% if b.status == 'failed' %}
       <form method="post" action="{{ url_for('admin.retry_batch', batch_id=b.id) }}">{{ action_form.hidden_tag() }}
         <button type="submit" class="primary">Retry</button></form>{% endif %}</td>
@@ -27,7 +28,7 @@
   {% else %}<tr><td colspan="7" class="muted">Queue is empty.</td></tr>{% endfor %}
 </table></div>
 
-<h2>Group membership transactions</h2>
+<div class="section-title"><h2>Group membership transactions</h2></div>
 <div class="table-wrap"><table>
   <tr><th>Created</th><th>Group</th><th>Action</th><th>Chain</th><th>Key rotation</th><th>Error</th><th></th></tr>
   {% for e in membership %}
@@ -43,7 +44,7 @@
   {% else %}<tr><td colspan="7" class="muted">Nothing pending.</td></tr>{% endfor %}
 </table></div>
 
-<h2>Recently confirmed</h2>
+<div class="section-title"><h2>Recently confirmed</h2></div>
 <div class="table-wrap"><table>
   <tr><th>Confirmed</th><th>Merkle root</th><th>Leaves</th><th>Transaction</th></tr>
   {% for b in confirmed %}
