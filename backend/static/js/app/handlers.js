@@ -10,28 +10,72 @@ H.onGatePin = (e) => {
   const pin = (e.target.value || '').replace(/\D/g, '').slice(0, 4);
   e.target.value = pin;
   const g = state.gate;
-  if (!g || g.busy) return;
+  if (!g || g.busy || g.lockedUntil > Date.now()) return;
   setState({ gate: Object.assign({}, g, { pin, error: pin ? '' : g.error }) });
   if (pin.length === 4) setTimeout(() => submitGate(pin), 120);
 };
 H.focusGate = () => {
   const el = document.getElementById('dc-gate-input');
-  if (!el) return;
-  if (!state.gate || !state.gate.pin) el.value = '';
+  if (!el || !state.gate || state.gate.lockedUntil > Date.now()) return;
+  if (!state.gate.pin) el.value = '';
   el.focus();
 };
 H.gateReset = () => setState({ gate: { mode: 'setup', pin: '', reset: true } });
-H.gateOtherAccount = async () => { await VAULT.wipe(); sessionStorage.clear(); location.replace('/login?reauth=1'); };
+H.gateOtherAccount = () => logout(false);
+
+const validSetupUsername = (value) => /^[a-zA-Z0-9_.]{3,15}$/.test((value || '').replace(/^@/, ''));
+H.onSetupProfile = (e) => {
+  const key = e.currentTarget.getAttribute('data-key');
+  const value = key === 'setupUsername'
+    ? e.currentTarget.value.replace(/^@/, '').slice(0, 15)
+    : e.currentTarget.value.slice(0, 50);
+  e.currentTarget.value = value;
+  setState({ gate: Object.assign({}, state.gate, { [key]: value, error: '' }) });
+};
+H.onSetupProfileFocus = (e) => {
+  setState({ gate: Object.assign({}, state.gate, { setupFocus: e.currentTarget.getAttribute('data-key') }) });
+};
+H.onSetupProfileBlur = () => {
+  setState({ gate: Object.assign({}, state.gate, { setupFocus: null }) });
+};
+H.onSetupProfileKey = (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  H.submitSetupProfile();
+};
+H.submitSetupProfile = async () => {
+  const g = state.gate;
+  if (!g || g.mode !== 'profile-setup' || g.busy) return;
+  const name = (g.setupName || '').trim();
+  const username = (g.setupUsername || '').trim().replace(/^@/, '').toLowerCase();
+  if (!name) {
+    setState({ gate: Object.assign({}, g, { error: 'Enter your name.' }) });
+    return;
+  }
+  if (!validSetupUsername(username)) {
+    setState({ gate: Object.assign({}, g, { error: 'Username must be 3–15 letters, numbers, _ or .' }) });
+    return;
+  }
+  setState({ gate: Object.assign({}, g, { busy: true, error: '' }) });
+  try {
+    state.me = await API.patch('/api/me', { display_name: name, username });
+    setGate({ mode: 'setup', pin: '' });
+  } catch (err) {
+    setState({ gate: Object.assign({}, g, { busy: false, error: errorText(err) }) });
+  }
+};
 
 async function submitGate(pin) {
   const g = state.gate;
+  if (!g || g.lockedUntil > Date.now()) return;
   const fail = (error, mode) => setState({ gate: { mode: mode || g.mode, pin: '', error } });
   try {
     if (g.mode === 'unlock') {
       setState({ gate: Object.assign({}, g, { busy: true }) });
       try { await unlockWith(pin); } catch (err) {
-        if (err.message === 'wiped') { location.replace('/login?reauth=1'); return; }
-        fail('Wrong passcode. ' + VAULT.attemptsLeft() + ' attempts left before this device is wiped.');
+        const lockedUntil = VAULT.lockedUntil();
+        if (lockedUntil) { setGate({ mode: 'unlock', pin: '', lockedUntil }); return; }
+        fail('Wrong passcode. ' + VAULT.attemptsLeft() + ' attempts left.');
       }
     } else if (g.mode === 'setup') {
       setState({ gate: { mode: 'setup-confirm', pin: '', first: pin, reset: g.reset } });
@@ -150,20 +194,22 @@ H.lockNow = () => lockApp();
 
 /* --- смена код-пароля: текущий → новый → подтверждение (ТЗ 6.5, 6.6) --- */
 H.goPasscode = () => {
-  set({ view: 'passcode', pc: { step: 'current', value: '', first: '', error: '', busy: false } });
+  set({ view: 'passcode', pc: { step: 'current', value: '', first: '', error: '', busy: false,
+                               lockedUntil: VAULT.lockedUntil() } });
   setTimeout(() => { const el = document.getElementById('dc-passcode-input'); if (el) el.focus(); }, 50);
 };
 H.closePasscode = () => set({ view: 'settings' });
 H.onPasscode = (e) => {
   const value = (e.target.value || '').replace(/\D/g, '').slice(0, 4);
   e.target.value = value;
-  if (state.pc.busy) return;
+  if (state.pc.busy || state.pc.lockedUntil > Date.now()) return;
   setState({ pc: Object.assign({}, state.pc, { value, error: value ? '' : state.pc.error }) });
   if (value.length === 4) setTimeout(() => submitPasscode(value), 120);
 };
 
 async function submitPasscode(value) {
   const pc = state.pc;
+  if (pc.lockedUntil > Date.now()) return;
   const next = (patch) => {
     setState({ pc: Object.assign({}, pc, { value: '' }, patch) });
     const el = document.getElementById('dc-passcode-input');
@@ -172,7 +218,11 @@ async function submitPasscode(value) {
   if (pc.step === 'current') {
     setState({ pc: Object.assign({}, pc, { busy: true }) });
     try { await VAULT.unlock(value); next({ step: 'new', busy: false, error: '' }); }
-    catch (e) { next({ busy: false, error: 'Wrong passcode.' }); }
+    catch (e) {
+      const lockedUntil = VAULT.lockedUntil();
+      next(lockedUntil ? { busy: false, lockedUntil, error: '' }
+                       : { busy: false, error: 'Wrong passcode. ' + VAULT.attemptsLeft() + ' attempts left.' });
+    }
   } else if (pc.step === 'new') {
     next({ step: 'confirm', first: value });
   } else {
@@ -186,6 +236,20 @@ async function submitPasscode(value) {
     } catch (e) { next({ step: 'new', busy: false, error: errorText(e) }); }
   }
 }
+
+// Обновляем обратный отсчёт и возвращаем возможность ввода в момент окончания блокировки.
+setInterval(() => {
+  const screen = state.gate || (state.view === 'passcode' ? state.pc : null);
+  if (!screen || !screen.lockedUntil) return;
+  if (screen.lockedUntil <= Date.now()) {
+    screen.lockedUntil = 0;
+    screen.error = '';
+    render();
+  } else {
+    const label = document.querySelector('.gate-error');
+    if (label) label.textContent = CX.lockout.message(screen.lockedUntil);
+  }
+}, 1000);
 
 /* --- поиск по сообщениям --- */
 H.openSearch = () => {
@@ -310,6 +374,7 @@ H.pickMenuItem = (e) => {
   const msg = findMsg(state.menuId);
   set({ menuId: null });
   if (!msg || msg.pending) return;
+  if (label === 'Download' && msg.file && msg.file.key) saveFile(msg);
   if (label === 'Forward') set({ forwardOpen: true, forwardMsgId: msg.id, forwardQuery: '' });
   if (label === 'Reply') {
     set({

@@ -26,7 +26,7 @@ class HttpRealmClient(IRealmClient):
         resp.raise_for_status()
         body = resp.json()
         return RealmRecoverResult(status=body["status"], sealed_share=body.get("sealed_share"),
-                                  attempts_left=body.get("attempts_left"))
+                                  attempts_left=body.get("attempts_left"), locked_until=body.get("locked_until"))
 
     def destroy(self, user_id: str) -> None:
         resp = self.http.delete(f"/v1/shares/{user_id}")

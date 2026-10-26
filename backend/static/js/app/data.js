@@ -47,6 +47,14 @@ async function importKeys() {
 
 function setGate(gate) { setState({ gate }); }
 
+function recoveryLockUntil() {
+  if (!S.userId) return 0;
+  const key = 'cx_recovery_lock_' + S.userId;
+  const until = Number(localStorage.getItem(key)) || 0;
+  if (until <= Date.now()) { localStorage.removeItem(key); return 0; }
+  return until;
+}
+
 /* ============================================================
    Запуск: какой экран PIN показать
    ============================================================ */
@@ -56,7 +64,7 @@ async function boot() {
   const hasVault = await VAULT.exists();
 
   if (!handoff) {
-    if (hasVault) setGate({ mode: 'unlock', pin: '' });
+    if (hasVault) setGate({ mode: 'unlock', pin: '', lockedUntil: VAULT.lockedUntil() });
     else location.replace('/login');
     return;
   }
@@ -67,9 +75,12 @@ async function boot() {
     const me = await API.get('/api/me');
     S.userId = me.id;
     state.me = me;
-    if (hasVault && VAULT.userId() === me.id) setGate({ mode: 'unlock', pin: '' });
+    if (hasVault && VAULT.userId() === me.id) setGate({ mode: 'unlock', pin: '', lockedUntil: VAULT.lockedUntil() });
+    else if (me.key_version == null && (handoff.is_new_user || !me.username)) {
+      setGate({ mode: 'profile-setup', setupName: '', setupUsername: '', error: '', busy: false });
+    }
     else if (me.key_version == null) setGate({ mode: 'setup', pin: '' });
-    else if (me.has_backup) setGate({ mode: 'restore', pin: '' });
+    else if (me.has_backup) setGate({ mode: 'restore', pin: '', lockedUntil: recoveryLockUntil() });
     else setGate({ mode: 'reset', pin: '' });
   } catch (e) {
     sessionStorage.removeItem('cx_login');
@@ -78,7 +89,7 @@ async function boot() {
 }
 
 async function unlockWith(pin) {
-  const st = await VAULT.unlock(pin); // wrong_pin | wiped
+  const st = await VAULT.unlock(pin); // wrong_pin | locked
   S.userId = st.user_id;
   S.keys = st.keys;
   S.convKeys = st.conv || {};
@@ -145,6 +156,8 @@ async function backupKeys(pin) {
 
 /* Новое устройство: PIN → доступ к долям на realm → K → пакет ключей. */
 async function restoreWith(pin) {
+  const existingLock = recoveryLockUntil();
+  if (existingLock) { setGate({ mode: 'restore', pin: '', lockedUntil: existingLock }); return; }
   setGate({ mode: 'busy', text: 'Restoring your keys…' });
   const meta = await API.get('/api/keys/backup');
   const pinKey = await CXC.pbkdf2(pin, CXC.unb64(meta.kdf_salt), meta.kdf_iterations);
@@ -164,6 +177,12 @@ async function restoreWith(pin) {
   }
   if (res.status === 'wrong_pin') {
     setGate({ mode: 'restore', pin: '', error: 'Wrong passcode. ' + res.attempts_left + ' attempts left.' });
+    return;
+  }
+  if (res.status === 'locked') {
+    const lockedUntil = res.locked_until * 1000;
+    localStorage.setItem('cx_recovery_lock_' + S.userId, String(lockedUntil));
+    setGate({ mode: 'restore', pin: '', lockedUntil });
     return;
   }
   if (res.status === 'destroyed') {
@@ -550,8 +569,10 @@ async function rotateGroup(threadId, opts) {
   try {
     const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
     if (opts.preferred || opts.periodic) await sleep(150);
-    else {
-      await sleep(8000 + Math.random() * 4000);
+    else await sleep(8000 + Math.random() * 4000);
+    // The user may lock the vault while this rotation timer is waiting.
+    if (state.gate || !API.session.access) return;
+    if (!opts.preferred && !opts.periodic) {
       const detail = await API.get('/api/threads/' + threadId);
       if (!detail.rotation_pending) return;
     }
@@ -860,6 +881,16 @@ function onWsFrame(frame, data) {
         if (state.activeThread === data.thread_id) state.activeThread = null;
       }
       if (data.thread_id && state.members[data.thread_id] && data.members_changed) loadMembers(data.thread_id).catch(() => {});
+      // Изменение профиля приходит без thread_id: обновляем только уже загруженные группы,
+      // где этот пользователь есть, чтобы имя/аватар сообщений поменялись сразу.
+      if (data.profile_user_id) {
+        Object.keys(state.members).forEach((threadId) => {
+          const members = state.members[threadId] || [];
+          if (members.some((member) => member.user.id === data.profile_user_id)) {
+            loadMembers(threadId).catch(() => {});
+          }
+        });
+      }
       reloadThreadsSoon();
       break;
     case 'key.rotation': {

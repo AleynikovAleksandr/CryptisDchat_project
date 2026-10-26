@@ -125,3 +125,4 @@ class RecoveryOut(BaseModel):
     status: str
     attempts_left: int | None
     shares: list[dict] | None
+    locked_until: float | None = None  # Unix timestamp, UTC; browser displays local time

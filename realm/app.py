@@ -38,6 +38,7 @@ except ImportError:  # запуск внутри контейнера realm, г�
 DATA_DIR = Path(os.environ.get("REALM_DATA_DIR", "/data"))
 API_TOKEN = os.environ.get("REALM_API_TOKEN", "")
 MAX_ATTEMPTS = int(os.environ.get("REALM_MAX_ATTEMPTS", "10"))
+LOCK_SECONDS = 15 * 60
 REALM_ID = os.environ.get("REALM_ID", "realm")
 
 
@@ -94,10 +95,13 @@ def create_app(data_dir: Path | None = None, api_token: str | None = None,
     limit = max_attempts or MAX_ATTEMPTS
     app = FastAPI(title=f"CryptisDchat {REALM_ID}", docs_url=None, redoc_url=None, openapi_url=None)
     holder: dict[str, Store] = {}
+    init_lock = threading.Lock()
 
     def get_store() -> Store:
-        if "store" not in holder:  # лениво: каталог данных создаётся при первом запросе
-            holder["store"] = Store(data_dir)
+        if "store" not in holder:
+            with init_lock:
+                if "store" not in holder:  # лениво, но только один поток создаёт ключ и БД
+                    holder["store"] = Store(data_dir)
         return holder["store"]
 
     def require_token(authorization: str = Header(default="")) -> None:
@@ -135,23 +139,26 @@ def create_app(data_dir: Path | None = None, api_token: str | None = None,
         st = get_store()
         request = st.open_json(body.sealed_request)
         with st.lock:
-            row = st.db.execute("SELECT sealed, attempts FROM shares WHERE user_id=?", (user_id,)).fetchone()
+            row = st.db.execute("SELECT sealed, attempts, updated_at FROM shares WHERE user_id=?", (user_id,)).fetchone()
             if row is None:
                 raise HTTPException(404, "no share")
+            now = time.time()
+            if row[1] >= limit and now < row[2] + LOCK_SECONDS:
+                return {"status": "locked", "attempts_left": 0, "locked_until": row[2] + LOCK_SECONDS}
             stored = st.open_json(row[0])
             given = base64.b64decode(request.get("auth", ""))
             expected = base64.b64decode(stored["auth"])
             if hmac.compare_digest(hashlib.sha256(given).digest(), hashlib.sha256(expected).digest()):
-                st.db.execute("UPDATE shares SET attempts=0 WHERE user_id=?", (user_id,))
+                st.db.execute("UPDATE shares SET attempts=0, updated_at=? WHERE user_id=?", (now, user_id))
                 st.db.commit()
                 sealed_share = ecies.seal(request.get("client_pub", ""), json.dumps({"share": stored["share"]}).encode())
                 return {"status": "ok", "sealed_share": sealed_share}
-            attempts = row[1] + 1
+            attempts = (0 if row[1] >= limit else row[1]) + 1
             if attempts >= limit:
-                st.db.execute("DELETE FROM shares WHERE user_id=?", (user_id,))
+                st.db.execute("UPDATE shares SET attempts=?, updated_at=? WHERE user_id=?", (attempts, now, user_id))
                 st.db.commit()
-                return {"status": "destroyed", "attempts_left": 0}
-            st.db.execute("UPDATE shares SET attempts=? WHERE user_id=?", (attempts, user_id))
+                return {"status": "locked", "attempts_left": 0, "locked_until": now + LOCK_SECONDS}
+            st.db.execute("UPDATE shares SET attempts=?, updated_at=? WHERE user_id=?", (attempts, now, user_id))
             st.db.commit()
             return {"status": "wrong_pin", "attempts_left": limit - attempts}
 

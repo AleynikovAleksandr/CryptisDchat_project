@@ -6,10 +6,11 @@
    ============================================================ */
 const GATE_TEXT = {
   boot: ['CryptisDchat', 'Loading…'],
+  'profile-setup': ['Create Your Profile', 'Enter the name people will see and choose a unique username.'],
   unlock: ['Enter Passcode', 'Your passcode unlocks the encrypted messages and keys stored on this device.'],
   setup: ['Create Passcode', 'This passcode protects your encryption keys on this device and restores them on a new one. Without it, you will not be able to access your messages.'],
   'setup-confirm': ['Confirm Passcode', 'Enter the same passcode once more.'],
-  restore: ['Restore Your Keys', 'Enter the passcode you set on your other device. Your keys will be reassembled from the independent backup services.'],
+  restore: ['Restore Account', 'Enter your passcode to restore your encrypted chats on this device. Your keys are recovered from independent backup services.'],
   reset: ['No Key Backup', 'This account has no backup that can be restored. You can create new encryption keys — messages sent before will stay unreadable on this device.'],
   busy: ['Please wait', ''],
 };
@@ -26,25 +27,47 @@ function gateHtml() {
   const g = state.gate || { mode: 'boot' };
   const [title, text] = GATE_TEXT[g.mode] || GATE_TEXT.boot;
   const needsPin = ['unlock', 'setup', 'setup-confirm', 'restore'].includes(g.mode);
+  const locked = g.lockedUntil > Date.now();
   let body = '';
-  if (needsPin) {
+  if (g.mode === 'profile-setup') {
+    const ready = !!((g.setupName || '').trim() && validSetupUsername(g.setupUsername));
+    const setupField = (key, label, max, placeholder, extra) => {
+      const value = g[key] || '';
+      return '<div class="pfield' + (g.setupFocus === key ? ' is-focus' : '') + '" data-mk="setup-' + key + '">' +
+        '<div class="pfield__top"><div class="pfield__label">' + label + '</div><div style="flex:1;"></div>' +
+          '<div class="pfield__count">' + value.length + ' / ' + max + '</div></div>' +
+        '<input value="' + esc(value) + '" maxlength="' + max + '" placeholder="' + placeholder + '" data-key="' + key + '"' +
+          ' data-input="onSetupProfile" data-keydown="onSetupProfileKey" data-focus="onSetupProfileFocus"' +
+          ' data-blur="onSetupProfileBlur"' + (extra || '') + '>' +
+      '</div>';
+    };
+    body = '<div class="setup-profile-form">' +
+      setupField('setupName', 'Name', 50, 'Name', ' autocomplete="name" autofocus') +
+      setupField('setupUsername', 'Username', 15, 'Username',
+        ' autocapitalize="none" autocomplete="username" spellcheck="false"') +
+      '<div class="setup-profile-hint">3–15 letters, numbers, underscores or dots.</div>' +
+      '<button class="btn-dark setup-profile-next" type="button" data-click="submitSetupProfile"' +
+        (ready && !g.busy ? '' : ' disabled') + '>' + (g.busy ? 'Saving…' : 'Continue') + '</button>' +
+    '</div>';
+  } else if (needsPin) {
     body = dotsHtml(g.pin, g.error) +
       '<input id="dc-gate-input" class="passcode-input" value="' + esc(g.pin || '') + '" autocomplete="off"' +
-      ' inputmode="numeric" pattern="[0-9]*" maxlength="4" data-input="onGatePin" autofocus>';
+      ' inputmode="numeric" pattern="[0-9]*" maxlength="4" data-input="onGatePin"' +
+      (locked ? ' disabled' : ' autofocus') + '>';
   } else if (g.mode === 'reset') {
     body = '<button class="btn-dark" type="button" data-click="gateReset">Create new keys</button>';
   } else {
     body = '<div class="gate-spinner"></div><div class="passcode-text">' + esc(g.text || '') + '</div>';
   }
-  const foot = g.mode === 'unlock' || g.mode === 'restore' || g.mode === 'reset'
-    ? '<button class="gate-link" type="button" data-click="gateOtherAccount">Use another wallet</button>' : '';
+  const foot = g.mode === 'profile-setup' || g.mode === 'unlock' || g.mode === 'restore' || g.mode === 'reset'
+    ? '<button class="gate-link" type="button" data-click="gateOtherAccount">Switch wallet</button>' : '';
   return '<div class="passcode-screen gate" data-mk="gate-' + g.mode + '" data-click="focusGate">' +
     '<div class="passcode-body">' +
-      I.lock +
+      (g.mode === 'profile-setup' ? I.person : I.lock) +
       '<div class="passcode-title">' + esc(title) + '</div>' +
       (text ? '<div class="passcode-text">' + esc(text) + '</div>' : '') +
       body +
-      '<div class="gate-error">' + esc(g.error || '') + '</div>' +
+      '<div class="gate-error">' + esc(locked ? CX.lockout.message(g.lockedUntil) : g.error || '') + '</div>' +
       foot +
     '</div>' +
     '<div class="gate-note">' + I.lockSm + ' End-to-end encrypted · keys never leave your device unencrypted</div>' +
@@ -181,9 +204,11 @@ function settingsHtml() {
       '<div class="set-row set-row--account" data-click="openMyProfile">' +
         avatarHtml(44, me.avatar_tint || BLUE, 16, initialsOf(me.display_name), me.avatar_url) +
         '<div class="set-row__label"><div style="font-weight:700;">' + esc(me.display_name || '') + '</div>' +
+          (me.username ? '<div class="set-row__value">@' + esc(me.username) + '</div>' : '') +
           '<div class="set-row__value mono">' + esc(shortAddr(me.ton_address_friendly)) + '</div></div>' +
         I.chevRight +
       '</div>' +
+      '<div class="set-note set-note--account-access">Your account does not expire. On another device, connect the same TON wallet and enter your passcode to restore encrypted chats.</div>' +
       '<div class="set-row" data-click="goSessions">' +
         '<div class="set-row__label">Active sessions</div>' + I.chevRight +
       '</div>' +
@@ -382,6 +407,7 @@ function sessionsHtml() {
 
 function passcodeHtml() {
   const pc = state.pc;
+  const locked = pc.lockedUntil > Date.now();
   const titles = {
     current: ['Change Passcode', 'Enter your current passcode.'],
     new: ['New Passcode', 'This passcode should be memorable and kept private. Without it, you will not be able to access your messages.'],
@@ -396,8 +422,9 @@ function passcodeHtml() {
       '<div class="passcode-text">' + text + '</div>' +
       (pc.busy ? '<div class="gate-spinner"></div>' : dotsHtml(pc.value, pc.error)) +
       '<input id="dc-passcode-input" class="passcode-input" value="' + esc(pc.value) + '" autocomplete="off"' +
-      ' inputmode="numeric" pattern="[0-9]*" maxlength="4" data-input="onPasscode">' +
-      '<div class="gate-error">' + esc(pc.error || '') + '</div>' +
+      ' inputmode="numeric" pattern="[0-9]*" maxlength="4" data-input="onPasscode"' +
+      (locked ? ' disabled' : '') + '>' +
+      '<div class="gate-error">' + esc(locked ? CX.lockout.message(pc.lockedUntil) : pc.error || '') + '</div>' +
     '</div>' +
   '</div>';
 }
@@ -507,12 +534,12 @@ function messagesHtml() {
 
     const actions = m.file
       ? '<div class="msg-actions msg-actions--file' + (m.mine ? ' is-mine' : '') + (hovered ? ' is-visible' : '') + '">' +
-          '<button class="msg-icon" type="button" data-id="' + m.id + '" data-click="openMsgMenu">' + I.dotsSm + '</button>' +
+          '<button class="msg-icon" type="button" title="Message actions" aria-label="Message actions" data-id="' + m.id + '" data-click="openMsgMenu">' + I.dotsSm + '</button>' +
           '<button class="msg-icon" type="button" title="Download" data-id="' + m.id + '" data-click="downloadFile">' + I.download + '</button>' +
           '<button class="msg-icon" type="button" title="React" data-click="react">' + I.reactPlus + '</button>' +
         '</div>'
       : '<div class="msg-actions' + (m.mine ? ' is-mine' : '') + (hovered ? ' is-visible' : '') + '">' +
-          '<button class="msg-icon" type="button" data-id="' + m.id + '" data-click="openMsgMenu">' + I.dotsSm + '</button>' +
+          '<button class="msg-icon" type="button" title="Message actions" aria-label="Message actions" data-id="' + m.id + '" data-click="openMsgMenu">' + I.dotsSm + '</button>' +
           '<button class="msg-icon" type="button" data-click="react">' + I.emojiSm + '</button>' +
         '</div>';
 
@@ -558,8 +585,7 @@ function msgMenuHtml() {
 
   return '<div class="msg-menu-scrim" data-mk="menuscrim" data-click="closeMsgMenu">' +
     '<div class="msg-menu" style="top:' + pos.top + 'px;left:' + pos.left + 'px;">' +
-      ['Reply', 'Forward', 'Copy text', 'Info']
-        .filter((label) => !(label === 'Copy text' && isFile))
+      (isFile ? ['Download', 'Reply', 'Forward', 'Info'] : ['Reply', 'Forward', 'Copy text', 'Info'])
         .map((label) =>
           '<div class="msg-menu__item" data-mk="mi' + label + '" data-label="' + label + '" data-click="pickMenuItem">' +
             '<span style="display:flex;align-items:center;color:#000;flex-shrink:0;">' + MENU_ICONS[label] + '</span>' +

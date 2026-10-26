@@ -308,7 +308,9 @@ class KeyService:
         if req is None or req.user_id != user.id:
             raise NotFound("recovery request not found")
         shares = json.loads(req.result_json) if req.result_json and req.status == "done" else None
-        return RecoveryOut(id=req.id, status=req.status, attempts_left=req.attempts_left, shares=shares)
+        lock = json.loads(req.result_json) if req.result_json and req.status == "locked" else {}
+        return RecoveryOut(id=req.id, status=req.status, attempts_left=req.attempts_left, shares=shares,
+                           locked_until=lock.get("locked_until"))
 
     async def mark_backup_restored(self, user: User, request_id: str) -> None:
         """Клиент собрал ключи — результат (доли под эфемерный ключ) больше хранить незачем."""

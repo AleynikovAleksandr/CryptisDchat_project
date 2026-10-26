@@ -9,16 +9,27 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import time
 
 from celery.signals import worker_ready
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.models import KeyBackup, KeyBackupShare, KeyRecoveryRequest, utcnow
 from app.services.key_service import REALM_KEYS_REDIS
 from worker.celery_app import celery_app, retry_delay
 from worker.runtime import cache_redis, db, realm_clients
 
 log = logging.getLogger(__name__)
+LOCK_SECONDS = 15 * 60
+
+
+def _record_lock(req: KeyRecoveryRequest, until: float) -> None:
+    req.status = "locked"
+    req.attempts_left = 0
+    req.result_json = json.dumps({"locked_until": until})
+    req.finished_at = utcnow()
 
 
 @celery_app.task(name="keys.refresh_realm_keys")
@@ -76,9 +87,20 @@ def recover(request_id: str, requests: list[dict]) -> str:
         backup = session.get(KeyBackup, req.user_id) if req else None
         if req is None or req.status != "pending" or backup is None:
             return "skipped"
+        redis = cache_redis()
+        failures_key = f"keys:recovery:failures:{req.user_id}:{backup.version}"
+        lock_key = f"keys:recovery:locked:{req.user_id}:{backup.version}"
+        active_lock = redis.get(lock_key)
+        if active_lock:
+            until = float(active_lock)
+            if until > time.time():
+                _record_lock(req, until)
+                session.commit()
+                return req.status
+            redis.delete(lock_key, failures_key)
         shares: list[dict] = []
         attempts: list[int] = []
-        destroyed = False
+        locked_until: list[float] = []
         for item in requests:
             idx = item["realm_index"]
             if idx >= len(clients):
@@ -90,25 +112,31 @@ def recover(request_id: str, requests: list[dict]) -> str:
                 continue
             if res.status == "ok" and res.sealed_share:
                 shares.append({"realm_index": idx, "sealed_share": res.sealed_share})
-            elif res.status == "destroyed":
-                destroyed = True
+            elif res.status == "locked" and res.locked_until is not None:
+                locked_until.append(res.locked_until)
             elif res.status == "wrong_pin" and res.attempts_left is not None:
                 attempts.append(res.attempts_left)
 
         req.finished_at = utcnow()
-        if len(shares) >= backup.threshold:
+        if locked_until:
+            until = max(max(locked_until), time.time() + LOCK_SECONDS)
+            redis.set(lock_key, until, ex=math.ceil(until - time.time()))
+            redis.delete(failures_key)
+            _record_lock(req, until)
+        elif len(shares) >= backup.threshold:
+            redis.delete(lock_key, failures_key)
             req.status = "done"
             req.result_json = json.dumps(shares)
-        elif destroyed or (attempts and min(attempts) <= 0):
-            # лимит неверных попыток исчерпан — уничтожаем доли на ВСЕХ realm (4.5)
-            req.status = "destroyed"
-            backup.status = "destroyed"
-            session.commit()
-            destroy_all.delay(req.user_id)
-            return req.status
         elif attempts:
-            req.status = "wrong_pin"
-            req.attempts_left = min(attempts)
+            count = redis.incr(failures_key)
+            if count >= get_settings().backup_max_pin_attempts:
+                until = time.time() + LOCK_SECONDS
+                redis.set(lock_key, until, ex=LOCK_SECONDS)
+                redis.delete(failures_key)
+                _record_lock(req, until)
+            else:
+                req.status = "wrong_pin"
+                req.attempts_left = get_settings().backup_max_pin_attempts - count
         else:
             req.status = "failed"
         session.commit()

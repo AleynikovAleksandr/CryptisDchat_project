@@ -11,7 +11,7 @@
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
 ![TON](https://img.shields.io/badge/TON-TonConnect-0098EA)
 ![E2EE](https://img.shields.io/badge/E2EE-XSalsa20--Poly1305%20%C2%B7%20ECDSA%20%C2%B7%20ECIES-6f42c1)
-![Tests](https://img.shields.io/badge/tests-74%20passed-success)
+![Tests](https://img.shields.io/badge/tests-90%20passed-success)
 
 An end-to-end encrypted messenger with a delivery log anchored on the TON blockchain — an
 implementation of the technical specification `CryptisDchat_TZ.md` and its appendices
@@ -33,8 +33,7 @@ CSS classes and re-rendering mechanics are preserved, and the demo data is repla
 - One browser = one device: the server issues a device key in an `HttpOnly; SameSite=Strict` cookie
   (rotated on every sign-in, only its SHA-256 is stored), so signing in again from the same browser — even
   after logging out — reuses the same device instead of creating a new one; tokens issued before the logout stay revoked
-- Devices with no activity for 30 days are ended automatically every night (e.g. after the browser's site data
-  was cleared); signing in from that browser again brings the same device back. Devices revoked more than 400 days ago are deleted
+- Inactivity does not delete an account or automatically end a device session. Devices revoked more than 400 days ago are deleted
 - Linking a second wallet and moving the account to a new wallet
 
 **End-to-end encryption (spec section 6)**
@@ -44,7 +43,7 @@ CSS classes and re-rendering mechanics are preserved, and the demo data is repla
 - Groups use a TreeKEM-like key tree: a membership change re-encrypts only the affected branch
 - Attachments are encrypted on the device with their own key
 - Search over encrypted history via a blind index (the server never learns the words)
-- Local storage of keys and history in OPFS behind a PIN (AES-256-GCM); wiped after 10 wrong PINs
+- Local storage of keys and history in OPFS behind a PIN (AES-256-GCM); 15-minute lock after 10 wrong PINs
 - Auto-lock after inactivity (1 min / 5 min / 30 min / 1 hour / never)
 - Key backup with 2-of-3 Shamir secret sharing across three independent realm services; restore on a new device with the PIN
 
@@ -166,11 +165,12 @@ end-to-end encryption and server-side checks, not on hiding the client.
 ### Tests
 
 ```bash
-.venv/bin/python -m pytest                      # 74 tests: API, worker, admin, WS, crypto compatibility
+.venv/bin/python -m pytest                      # 90 tests: API, worker, admin, WS, crypto compatibility
 .venv/bin/python -m playwright install chromium # once
 .venv/bin/python scripts/dev_server.py &        # stack for the browser scenario
 .venv/bin/python tests/e2e/e2e_browser.py       # end-to-end scenario in Chromium (4 browser profiles)
-.venv/bin/python tests/e2e/e2e_mobile.py        # phone layout (390×844, touch): one column, long-press menu, sheets
+.venv/bin/python tests/e2e/e2e_mobile.py        # phone flows, PIN and layouts (390×844 and 320×700)
+# If Chromium is unavailable but Chrome is installed: add --channel chrome
 ```
 
 ---
@@ -282,8 +282,8 @@ a JWT issued earlier is rejected even before it expires.
 | Groups | **TreeKEM-like tree**: membership change → TON transaction → after confirmation the initiating client updates only the leaf's branch (O(log N) encryptions) → epoch key sealed under the new root key |
 | Attachments | each file is encrypted with its own random key, which travels inside the encrypted message |
 | Search | blind index: HMAC(key, word prefix) — the server compares tokens without knowing the words |
-| Local storage (6.5) | keys, refresh token and history in OPFS, AES-256-GCM from PBKDF2(PIN); 10 wrong PINs → wipe; logout → deletion |
-| Backup (6.6) | keys are encrypted with a random K; K is split with **2-of-3 Shamir**; each share plus a PIN-derived access key is sealed to its realm's key; 10 wrong PINs → shares destroyed on all realms |
+| Local storage (6.5) | keys, refresh token and history in OPFS, AES-256-GCM from PBKDF2(PIN); 10 wrong PINs → 15-minute lock; logout → deletion |
+| Backup (6.6) | keys are encrypted with a random K; K is split with **2-of-3 Shamir**; each share plus a PIN-derived access key is sealed to its realm's key; 10 wrong PINs → 15-minute lock on the realm services |
 
 The server stores only ciphertext and public keys; the server code has no path to plaintext.
 

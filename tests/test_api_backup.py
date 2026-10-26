@@ -19,9 +19,11 @@ async def create_backup(user, infra, pin="1234") -> dict:
     return bundle
 
 
-async def recover(user, pin: str) -> tuple[dict, object, dict]:
+async def recover(user, pin: str, realm_indices: tuple[int, ...] | None = None) -> tuple[dict, object, dict]:
     meta = (await user.get("/api/keys/backup")).json()
     reqs, eph = cc.recovery_requests(pin, meta)
+    if realm_indices is not None:
+        reqs = [r for r in reqs if r["realm_index"] in realm_indices]
     started = (await user.post("/api/keys/recovery", {"requests": reqs})).json()
     status = (await user.get(f"/api/keys/recovery/{started['id']}")).json()
     return status, eph, meta
@@ -43,20 +45,37 @@ async def test_backup_and_restore_on_new_device(make_user, infra, client):
     assert cc.open_backup(meta, status["shares"], eph) == bundle
 
 
-async def test_wrong_pin_counts_attempts_then_destroys_shares(make_user, infra):
+async def test_tenth_wrong_pin_locks_recovery_for_fifteen_minutes(make_user, infra, realms, tmp_path, monkeypatch):
     user = await make_user()
     await create_backup(user, infra)
+    from realm import app as realm_app
+    from worker.tasks import keys as key_tasks
+    now = 1_800_000_000.0
+    from types import SimpleNamespace
+    monkeypatch.setattr(realm_app, "time", SimpleNamespace(time=lambda: now))
+    monkeypatch.setattr(key_tasks, "time", SimpleNamespace(time=lambda: now))
     status, _, _ = await recover(user, "0000")
     assert status["status"] == "wrong_pin" and status["attempts_left"] == 9
     for _ in range(8):
         status, _, _ = await recover(user, "0000")
     assert status["attempts_left"] == 1
     status, _, _ = await recover(user, "9999")
-    assert status["status"] == "destroyed"
-    # после уничтожения даже правильный PIN не поможет
-    r = await user.post("/api/keys/recovery", {"requests": [{"realm_index": 0, "sealed_request": "x"},
-                                                            {"realm_index": 1, "sealed_request": "y"}]})
-    assert r.status_code == 404 and r.json()["error"] == "no_backup"
+    assert status["status"] == "locked" and status["locked_until"] == now + 15 * 60
+    assert (await user.get("/api/keys/backup")).json()["status"] == "active"
+    from fastapi.testclient import TestClient
+    fresh_realm = TestClient(realm_app.create_app(tmp_path / "realm0", api_token="t", max_attempts=10),
+                             headers={"Authorization": "Bearer t"})
+    meta = (await user.get("/api/keys/backup")).json()
+    sealed, _ = cc.recovery_requests("1234", meta)
+    response = fresh_realm.post(f"/v1/shares/{user.id}/recover",
+                                json={"sealed_request": sealed[0]["sealed_request"]})
+    assert response.json()["status"] == "locked"
+    status, _, _ = await recover(user, "1234")
+    assert status["status"] == "locked" and status["locked_until"] == now + 15 * 60
+    now += 15 * 60
+    status, eph, meta = await recover(user, "1234")
+    assert status["status"] == "done"
+    assert cc.open_backup(meta, status["shares"], eph)["identity"] == "pkcs8-identity-b64"
 
 
 async def test_correct_pin_resets_attempt_counter(make_user, infra):
@@ -68,6 +87,20 @@ async def test_correct_pin_resets_attempt_counter(make_user, infra):
     assert status["status"] == "done"
     status, _, _ = await recover(user, "1111")
     assert status["attempts_left"] == 9
+
+
+async def test_rotating_realm_pairs_cannot_exceed_ten_wrong_pins(make_user, infra):
+    user = await make_user()
+    await create_backup(user, infra)
+    pairs = ((0, 1), (1, 2), (0, 2))
+    for attempt in range(10):
+        status, _, _ = await recover(user, "0000", pairs[attempt % len(pairs)])
+        if attempt < 9:
+            assert status["status"] == "wrong_pin"
+            assert status["attempts_left"] == 9 - attempt
+    assert status["status"] == "locked" and status["attempts_left"] == 0
+    status, _, _ = await recover(user, "1234", (0, 1))
+    assert status["status"] == "locked"
 
 
 async def test_backup_survives_one_realm_outage(make_user, infra, realms):

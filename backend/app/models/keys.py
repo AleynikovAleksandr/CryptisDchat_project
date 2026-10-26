@@ -104,7 +104,7 @@ class KeyRecoveryRequest(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     device_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    status: Mapped[str] = mapped_column(String(12), nullable=False, default="pending")  # pending|done|wrong_pin|destroyed|failed
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="pending")  # pending|done|wrong_pin|locked|failed
     result_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # доли, зашифрованные под эфемерный ключ клиента
     attempts_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)

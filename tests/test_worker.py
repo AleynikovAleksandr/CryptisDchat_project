@@ -97,7 +97,7 @@ async def test_expired_messages_are_purged(make_user, infra):
 
 
 
-async def test_inactive_devices_are_ended_and_old_revoked_ones_deleted(client, infra):
+async def test_inactive_devices_stay_active_and_old_revoked_ones_are_deleted(client, infra):
     wallet = cc.DevWallet()
     stale, fresh = await login(client, wallet), await login(client, wallet)
     hf = {"Authorization": f"Bearer {fresh['access_token']}"}
@@ -109,11 +109,12 @@ async def test_inactive_devices_are_ended_and_old_revoked_ones_deleted(client, i
 
     infra.tasks.enqueue("maintenance.cleanup_devices")
     sessions = (await client.get("/api/auth/sessions", headers=hf)).json()
-    assert [d["device_id"] for d in sessions] == [fresh_id]
+    assert {d["device_id"] for d in sessions} == {stale_id, fresh_id}
     r = await client.post("/api/auth/refresh", json={"refresh_token": stale["refresh_token"]})
-    assert r.status_code == 401
+    assert r.status_code == 200
+    assert (await client.get("/api/me", headers=hf)).status_code == 200
 
-    # вернулись в тот же браузер — то же устройство, а не новое
+    # повторный вход из того же браузера использует то же устройство
     back = await login(client, wallet, device_cookie=stale["_device"])
     sessions = (await client.get("/api/auth/sessions", headers={"Authorization": f"Bearer {back['access_token']}"})).json()
     assert {d["device_id"] for d in sessions} == {stale_id, fresh_id}

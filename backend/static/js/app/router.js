@@ -34,7 +34,9 @@ function pathOf(s) {
 
 /* Вызывается из setState после каждой отрисовки. */
 function routeSync() {
-  if (!router.armed || router.applying || state.gate) return;
+  // history.back() completes asynchronously. A toast or another render before
+  // popstate must not queue a second Back and skip the intended screen.
+  if (!router.armed || router.applying || router.expectPop || state.gate) return;
   const next = pathOf(state);
   if (next === location.pathname) return;
   const cur = history.state || {};
@@ -84,7 +86,11 @@ function routeStart() {
 }
 
 window.addEventListener('popstate', () => {
-  if (router.expectPop) { router.expectPop = false; return; }
+  if (router.expectPop) {
+    router.expectPop = false;
+    routeSync(); // state may have changed while Back was pending
+    return;
+  }
   if (!router.armed || state.gate) return; // под PIN-экраном адрес применится после разблокировки
   applyPath(location.pathname);
 });

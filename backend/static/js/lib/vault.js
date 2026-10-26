@@ -12,9 +12,10 @@
   const C = () => root.CX.crypto;
   const FILE = 'cryptis-vault.bin';
   const LS_KEY = 'cx_vault';
-  const META = 'cx_vault_meta';      // незашифрованное: user_id и счётчик неверных PIN
+  const META = 'cx_vault_meta';      // незашифрованное: user_id, счётчик неверных PIN и срок блокировки
   const ITERATIONS = 310000;
   const MAX_LOCAL_ATTEMPTS = 10;
+  const LOCK_MS = 15 * 60 * 1000;
 
   let key = null;       // CryptoKey AES-GCM, живёт только пока хранилище разблокировано
   let salt = null;
@@ -73,7 +74,15 @@
   const vault = {
     async exists() { return !!(await readRaw()); },
     userId() { return meta().user_id || null; },
-    attemptsLeft() { return MAX_LOCAL_ATTEMPTS - (meta().failed || 0); },
+    attemptsLeft() {
+      const m = meta();
+      return m.locked_until && Date.now() >= m.locked_until
+        ? MAX_LOCAL_ATTEMPTS : Math.max(0, MAX_LOCAL_ATTEMPTS - (m.failed || 0));
+    },
+    lockedUntil() {
+      const until = meta().locked_until || 0;
+      return until > Date.now() ? until : 0;
+    },
     isUnlocked() { return !!key; },
 
     async create(pin, state) {
@@ -84,6 +93,7 @@
     },
 
     async unlock(pin) {
+      if (vault.lockedUntil()) throw new Error('locked');
       const raw = await readRaw();
       if (!raw) throw new Error('no_vault');
       const box = JSON.parse(raw);
@@ -92,16 +102,19 @@
       try {
         const pt = await root.crypto.subtle.decrypt({ name: 'AES-GCM', iv: C().unb64(box.iv) }, k, C().unb64(box.ct));
         key = k; salt = s;
-        setMeta({ ...meta(), failed: 0 });
+        setMeta({ ...meta(), failed: 0, locked_until: 0 });
         return JSON.parse(C().fromUtf8(new Uint8Array(pt)));
       } catch (e) {
         const m = meta();
+        if (m.locked_until && Date.now() >= m.locked_until) m.failed = 0;
         m.failed = (m.failed || 0) + 1;
-        setMeta(m);
-        if (m.failed >= MAX_LOCAL_ATTEMPTS) {  // защита от перебора PIN на украденном устройстве
-          await vault.wipe();
-          throw new Error('wiped');
+        if (m.failed >= MAX_LOCAL_ATTEMPTS) {
+          m.locked_until = Date.now() + LOCK_MS;
+          setMeta(m);
+          throw new Error('locked');
         }
+        delete m.locked_until;
+        setMeta(m);
         throw new Error('wrong_pin');
       }
     },

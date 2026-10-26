@@ -92,7 +92,7 @@ class TestClientRealm(IRealmClient):
             return RealmRecoverResult(status="not_found")
         body = r.json()
         return RealmRecoverResult(status=body["status"], sealed_share=body.get("sealed_share"),
-                                  attempts_left=body.get("attempts_left"))
+                                  attempts_left=body.get("attempts_left"), locked_until=body.get("locked_until"))
 
     def destroy(self, user_id: str) -> None:
         self.c.delete(f"/v1/shares/{user_id}")

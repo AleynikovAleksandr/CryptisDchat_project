@@ -71,4 +71,5 @@ Object.assign(I, {
 });
 
 MENU_ICONS['Info'] = I.infoSm;
+MENU_ICONS['Download'] = I.download;
 

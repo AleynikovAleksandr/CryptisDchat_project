@@ -11,9 +11,10 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class RealmRecoverResult:
-    status: str                    # ok | wrong_pin | destroyed | not_found | error
+    status: str                    # ok | wrong_pin | locked | not_found | error
     sealed_share: str | None = None  # доля под эфемерный ключ клиента
     attempts_left: int | None = None
+    locked_until: float | None = None  # Unix timestamp, UTC
 
 
 class IRealmClient(ABC):

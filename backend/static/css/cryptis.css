@@ -392,6 +392,14 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
 }
 .passcode-dot.is-active { border-color: #0f1419; }
 .passcode-input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.setup-profile-form {
+  width: min(100%, 360px);
+  display: flex; flex-direction: column; gap: 14px;
+  text-align: left;
+}
+.setup-profile-hint { padding: 0 4px; color: #536471; font-size: 12.5px; line-height: 1.35; }
+.setup-profile-next { width: 100%; margin-top: 4px; }
+.setup-profile-next:disabled { opacity: 0.45; cursor: default; }
 
 /* ============================================================
    9. ПУСТОЙ ЧАТ
@@ -1056,7 +1064,12 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
   transition: background 140ms ease;
 }
 .paction__circle.is-open { background: hsl(200 19% 86%); }
-.paction__label { font-size: 15px; font-weight: 500; }
+.paction__label {
+  font-size: 15px; font-weight: 500;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 .pmore {
   position: absolute; top: 56px; right: 0; left: auto; z-index: 30;
@@ -1339,6 +1352,7 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
 
 /* настройки */
 .set-row--account { gap: 14px; }
+.set-note--account-access { margin: 8px 4px 6px; line-height: 1.4; }
 .set-toggle-row--flat { margin-top: 0; }
 .pill-current { margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: hsl(204 88% 53% / 0.14);
                 color: hsl(204 88% 40%); font-size: 12px; font-weight: 700; }
@@ -1420,7 +1434,7 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
   /* композер: кнопки эмодзи нет (пока ничего не делает), поле шире */
   .comp-emoji { display: none; }
   .comp-btn { width: 44px; height: 44px; }
-  .comp-attach, .composer.is-rail .comp-attach { left: 8px; bottom: 10px; }
+  .comp-attach, .composer.is-rail .comp-attach { left: 8px; bottom: 12px; }
   .comp-field, .composer.is-rail .comp-field { left: 60px; right: 8px; bottom: 10px; max-width: none; }
   .comp-textarea { max-height: 160px; }
   .reply-draft-layer { bottom: 62px; padding: 0 8px 4px; }
@@ -1454,15 +1468,23 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
 
   /* карточка профиля */
   .pbody { padding: 0 16px 20px; }
-  .pactions { gap: 14px; }
+  .pactions { gap: 18px; }
   .paction__circle { width: 56px; height: 56px; }
   .pmore { right: 0; }
   .pedit-fields { padding: 18px 16px 24px; }
 }
 
-/* без мыши кнопки при наведении бесполезны — действия доступны долгим нажатием */
+/* На сенсорном экране оставляем рядом с сообщением одну явную кнопку меню.
+ * Остальные действия доступны внутри неё; долгое нажатие остаётся запасным способом. */
 @media (hover: none) {
-  .msg-actions { display: none; }
+  .msg-row { gap: 2px; }
+  .msg-actions { display: flex; flex: 0 0 24px; opacity: 1; }
+  .msg-actions .msg-icon { width: 24px; }
+  .msg-actions .msg-icon:not(:first-child) { display: none; }
+  .msg-row > .bubble, .msg-row > .file-card {
+    box-sizing: border-box;
+    max-width: calc(100% - 26px);
+  }
   .msg-row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   .thread:hover, .member-row:hover, .dir-row:hover, .fwd-row:hover, .msg-icon:hover { background: transparent; }
   .thread.is-active { background: hsl(200 19% 96%); }

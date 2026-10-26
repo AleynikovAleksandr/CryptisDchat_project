@@ -9,7 +9,7 @@ import subprocess
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select
 
 from app.config import get_settings
 from app.models import Attachment, Device, KeyRecoveryRequest, Message, RefreshToken, ThreadMember, utcnow
@@ -77,24 +77,14 @@ def cleanup_tokens() -> None:
 
 @celery_app.task(name="maintenance.cleanup_devices")
 def cleanup_devices() -> int:
-    """Завершить сессии устройств, с которых давно не заходили (браузер очистили, потеряли и т.п.).
-
-    Повторный вход из того же браузера (cookie устройства) вернёт то же устройство. Отозванные
-    устройства старше срока cookie вернуть уже нечем — они удаляются вместе с токенами.
-    """
+    """Удалить только давно отозванные устройства; бездействие не завершает сессию."""
     s = get_settings()
     now = utcnow()
     with db() as session:
-        stale = list(session.scalars(select(Device.id).where(
-            Device.revoked_at.is_(None), Device.last_seen_at < now - timedelta(days=s.device_inactive_days))))
-        if stale:
-            session.execute(update(Device).where(Device.id.in_(stale)).values(revoked_at=now))
-            session.execute(update(RefreshToken).where(
-                RefreshToken.device_id.in_(stale), RefreshToken.revoked_at.is_(None)).values(revoked_at=now))
-        session.execute(delete(Device).where(
+        result = session.execute(delete(Device).where(
             Device.revoked_at < now - timedelta(days=s.device_cookie_max_age_days)))
         session.commit()
-    return len(stale)
+    return result.rowcount or 0
 
 
 @celery_app.task(name="maintenance.backup_database")
