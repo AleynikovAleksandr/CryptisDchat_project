@@ -976,13 +976,23 @@ let noticeTimer = null, noticeHideTimer = null;
 
 function askNotificationPermission() {
   if (!('Notification' in window)) return;
+  set({ notifyPermission: Notification.permission });
   if (Notification.permission === 'granted') { enablePush(); return; }
   if (Notification.permission !== 'default') return;
   // браузеры разрешают запрос только в ответ на действие пользователя
-  const ask = () => {
-    Notification.requestPermission().then((p) => { if (p === 'granted') enablePush(); }).catch(() => {});
-  };
-  document.addEventListener('pointerdown', ask, { once: true });
+  document.addEventListener('pointerdown', () => { requestNotifications(); }, { once: true });
+}
+
+/* Запрос разрешения (из жеста пользователя): первый клик по странице или строка в настройках. */
+async function requestNotifications() {
+  if (!('Notification' in window)) return 'unsupported';
+  let p = Notification.permission;
+  if (p === 'default') {
+    try { p = await Notification.requestPermission(); } catch (e) { p = Notification.permission; }
+  }
+  set({ notifyPermission: p });
+  if (p === 'granted') enablePush();
+  return p;
 }
 
 /* Web Push: service worker показывает уведомление, даже когда вкладка закрыта. */
@@ -1001,11 +1011,21 @@ function serviceWorker() {
   return swReady || Promise.resolve(null);
 }
 
+/* showNotification и pushManager.subscribe работают только с активным worker'ом, а сразу после
+ * register() он ещё устанавливается — ждём готовности (не дольше 5 секунд). */
+async function activeWorker() {
+  const reg = await serviceWorker();
+  if (!reg) return null;
+  if (reg.active) return reg;
+  const timeout = new Promise((ok) => setTimeout(() => ok(null), 5000));
+  return Promise.race([navigator.serviceWorker.ready, timeout]);
+}
+
 const sameKey = (a, b) => !!a && a.byteLength === b.byteLength && new Uint8Array(a).every((x, i) => x === b[i]);
 
 async function enablePush() {
   try {
-    const reg = await serviceWorker();
+    const reg = await activeWorker();
     if (!reg || !('PushManager' in window) || Notification.permission !== 'granted') return;
     let key;
     try { key = (await API.get('/api/push/vapid-public-key')).public_key; } catch (e) { return; }  // Web Push не настроен
@@ -1040,12 +1060,14 @@ async function systemNotify(threadId, title, text) {
     icon: '/static/images/icon-round.png', tag: 'cx-' + threadId, renotify: true, data: { threadId },
   };
   // через service worker уведомления работают и на Android, а клик обрабатывает sw.js
-  const reg = await serviceWorker();
-  if (reg) { reg.showNotification(title, options).catch(() => {}); return; }
+  const reg = await activeWorker();
+  if (reg) {
+    try { await reg.showNotification(title, options); return; } catch (e) { console.warn('showNotification', e); }
+  }
   try {
     const n = new Notification(title, options);
     n.onclick = () => { window.focus(); openThread(threadId); n.close(); };
-  } catch (e) { /* браузер без service worker и без конструктора Notification */ }
+  } catch (e) { console.warn('Notification', e); }
 }
 
 function showNotice(notice) {

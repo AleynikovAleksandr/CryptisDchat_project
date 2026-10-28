@@ -24,6 +24,7 @@ const state = {
   groupPermQuery: '', blacklistQuery: '', blacklistFocus: false,
   sidebarOpen: true, deleteMediaOpen: false,
   toast: null, toastVisible: false, notice: null,
+  notifyPermission: typeof Notification === 'function' ? Notification.permission : 'unsupported',
   replyDraft: null, forwardOpen: false, forwardQuery: '', forwardFocus: false, forwardMsgId: null,
   infoOpen: false, infoMsgId: null, info: null,
   editName: '', editHandle: '', profileTarget: 'thread',

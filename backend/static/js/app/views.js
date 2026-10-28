@@ -229,6 +229,12 @@ function settingsHtml() {
       '</div>' +
       '<div class="set-row" data-click="lockNow"><div class="set-row__label">Lock now</div></div>' +
 
+      '<div class="set-h set-h--gap">Notifications</div>' +
+      '<div class="set-row" data-click="enableNotifications">' +
+        '<div class="set-row__label">System notifications</div>' +
+        '<div class="set-row__value">' + esc(NOTIFY_LABEL[s.notifyPermission] || 'Not supported') + '</div>' +
+      '</div>' +
+
       '<div class="set-h set-h--gap">Privacy</div>' +
       '<div class="set-toggle-row set-toggle-row--flat">' +
         '<div style="flex:1;"><div class="set-toggle-row__title">Show when I’m online</div></div>' +
@@ -544,6 +550,8 @@ function noticeHtml() {
     '</div>' +
   '</div>';
 }
+
+const NOTIFY_LABEL = { granted: 'On', denied: 'Blocked in browser', default: 'Tap to turn on' };
 
 function messagesHtml() {
   const s = state;

@@ -360,6 +360,17 @@ H.noop = () => {};
 H.stop = (e) => e.stopPropagation();
 
 /* --- уведомление о новом сообщении --- */
+H.enableNotifications = async () => {
+  const p = await requestNotifications();
+  if (p === 'granted') {
+    showToast('Notifications are on');
+    systemNotify(state.activeThread || '', 'CryptisDchat', 'Notifications are working');  // проверочное
+  } else if (p === 'denied') {
+    showToast('Notifications are blocked — allow them in the site settings (lock icon in the address bar).');
+  } else if (p === 'unsupported') {
+    showToast('This browser does not support notifications.');
+  }
+};
 H.openNotice = () => {
   const n = state.notice;
   if (!n) return;
