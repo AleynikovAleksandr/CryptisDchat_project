@@ -508,9 +508,11 @@ function hiddenTextHtml(cls, key, text, hash) {
   key = 'h' + key.replace(/[^\w-]/g, '');
   hiddenRules.push('[data-ht="' + key + '"]::after{content:' + cssString(text) + '}');
   return '<span class="' + cls + ' is-hashed" data-ht="' + key + '">' +
-    '<span class="bubble__hash">' + esc(hash || 'encrypting…') + '</span></span>';
+    // hidden, а не только CSS: хеш не должен показаться, даже если cryptis.css взят из старого кэша
+    '<span class="bubble__hash" hidden>' + esc(hash || 'encrypting…') + '</span></span>';
 }
-const hashedTextHtml = (m) => hiddenTextHtml('bubble__text', m.id, CX.md.plain(m.text), m.hash);
+// текст выводится ровно таким, каким его отправили: с переносами строк и всеми символами
+const hashedTextHtml = (m) => hiddenTextHtml('bubble__text', m.id, m.text, m.hash);
 
 function flushHiddenText() {
   const css = hiddenRules.join('\n');
