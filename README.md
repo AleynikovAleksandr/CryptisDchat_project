@@ -134,6 +134,11 @@ start** with weak secrets or with the dev sign-in enabled.
 **realm.env** — `REALM_API_TOKEN` (token shared by the worker and the realms) and `REALM_MAX_ATTEMPTS` (10).
 All three files are in `.gitignore`, with `600` permissions.
 
+**Web Push** (notifications when the app tab is closed) — add to `.env` the lines printed by
+`python scripts/gen_vapid_key.py`: `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (`mailto:` contact for push services).
+Without `VAPID_PRIVATE_KEY` Web Push is off and the worker only logs notifications. Changing the key makes
+every browser re-subscribe on its next visit.
+
 ### Local run without Docker (development)
 
 ```bash
@@ -340,7 +345,8 @@ Every `/api/*` route except sign-in and avatars requires the `Authorization: Bea
 | GET | `/api/me` | Own profile: name, username, TON address, key version, backup status |
 | PATCH | `/api/me` | Change name / username / bio |
 | POST | `/api/me/avatar` | Upload an avatar |
-| POST | `/api/me/push-token` | Register the device's push-notification token |
+| POST | `/api/me/push-token` | Register the device's push-notification token (`webpush`: a `PushSubscription` JSON; only known browser push services are accepted) |
+| GET | `/api/push/vapid-public-key` | VAPID `applicationServerKey` for `pushManager.subscribe()` (404 if Web Push is not configured) |
 | GET | `/api/contacts?query=` | Search people by name, username or TON address |
 | GET | `/api/users/{user_id}` | A user's public profile |
 | GET | `/api/media/avatars/{upload_id}` | Avatar (by an unguessable UUID, no token needed) |

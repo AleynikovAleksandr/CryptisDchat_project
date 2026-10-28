@@ -359,6 +359,20 @@ H.react = () => showToast('Reactions are coming soon');
 H.noop = () => {};
 H.stop = (e) => e.stopPropagation();
 
+/* --- уведомление о новом сообщении --- */
+H.openNotice = () => {
+  const n = state.notice;
+  if (!n) return;
+  hideNotice();
+  openThread(n.threadId);
+};
+H.closeNotice = (e) => { e.stopPropagation(); hideNotice(); };
+H.toggleNotice = (e) => {
+  e.stopPropagation();
+  clearTimeout(noticeTimer);  // раскрытое сообщение читают — не прячем его по таймеру
+  if (state.notice) setState({ notice: Object.assign({}, state.notice, { expanded: !state.notice.expanded }) });
+};
+
 H.downloadFile = (e) => {
   const msg = findMsg(e.currentTarget.getAttribute('data-id'));
   if (msg && msg.file && msg.file.key) saveFile(msg);
@@ -471,6 +485,7 @@ H.pickPerson = async (e) => {
   try {
     const detail = await API.post('/api/threads', { user_id: id });
     if (!threadById(detail.id)) state.threads = [toThread(detail)].concat(state.threads);
+    loadThreads().catch(() => {});  // отбрасывает ответы запросов, ушедших до создания чата
     await openThread(detail.id);
   } catch (err) { showToast(errorText(err)); }
 };
@@ -518,6 +533,7 @@ H.groupCreate = async () => {
     const detail = await API.post('/api/groups', { title: name, member_ids: members, avatar_upload_id: avatar ? avatar.id : null });
     state.members[detail.id] = detail.members;
     state.threads = [toThread(detail)].concat(state.threads.filter((t) => t.id !== detail.id));
+    loadThreads().catch(() => {});
     await openThread(detail.id);
     showToast('Group created — securing keys…');
   } catch (err) { showToast(errorText(err)); }
@@ -591,6 +607,7 @@ H.deleteThread = async () => {
     delete S.cache[t.id];
     persist();
     setState({ threads: rest, activeThread: null, profileOpen: false, profileClosing: false, moreOpen: false });
+    loadThreads().catch(() => {});
   } catch (err) { showToast(errorText(err)); }
 };
 H.saveProfile = async () => {

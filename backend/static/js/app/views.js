@@ -494,6 +494,55 @@ function statusHtml(m, t) {
   return chain + '<span class="msg-status" title="' + (read ? 'Read' : delivered ? 'Delivered' : 'Sent') + '">' + tick + '</span>';
 }
 
+/* Открытый текст сообщения не попадает в DOM: в разметке пузыря лежит только SHA-256
+ * шифротекста, а читаемый текст выводится через ::after из сконструированной таблицы
+ * стилей (adoptedStyleSheets не видны в дереве элементов DevTools). */
+const hiddenSheet = typeof CSSStyleSheet === 'function' && 'adoptedStyleSheets' in document ? new CSSStyleSheet() : null;
+if (hiddenSheet) document.adoptedStyleSheets = document.adoptedStyleSheets.concat([hiddenSheet]);
+let hiddenCss = '';
+let hiddenRules = [];  // собираются за один проход render() и применяются в flushHiddenText
+const cssString = (s) => '"' + String(s).replace(/[\\"]/g, '\\$&').replace(/[\u0000-\u001f\u007f]/g, (c) => '\\' + c.charCodeAt(0).toString(16) + ' ') + '"';
+
+function hiddenTextHtml(cls, key, text, hash) {
+  if (!hiddenSheet) return '<span class="' + cls + '">' + esc(text) + '</span>';
+  key = 'h' + key.replace(/[^\w-]/g, '');
+  hiddenRules.push('[data-ht="' + key + '"]::after{content:' + cssString(text) + '}');
+  return '<span class="' + cls + ' is-hashed" data-ht="' + key + '">' +
+    '<span class="bubble__hash">' + esc(hash || 'encrypting…') + '</span></span>';
+}
+const hashedTextHtml = (m) => hiddenTextHtml('bubble__text', m.id, CX.md.plain(m.text), m.hash);
+
+function flushHiddenText() {
+  const css = hiddenRules.join('\n');
+  hiddenRules = [];
+  if (hiddenSheet && css !== hiddenCss) { hiddenSheet.replaceSync(css); hiddenCss = css; }
+}
+
+/* ============================================================
+   Уведомление о новом сообщении внутри страницы (стиль пузыря)
+   ============================================================ */
+const NOTICE_SHORT = 140;
+function noticeHtml() {
+  const n = state.notice;
+  const long = n.text.length > NOTICE_SHORT || n.text.split('\n').length > 3;
+  const shown = long && !n.expanded
+    ? n.text.split('\n').slice(0, 3).join('\n').slice(0, NOTICE_SHORT).trimEnd() + '…'
+    : n.text;
+  return '<div class="notice' + (n.visible ? ' is-visible' : '') + (n.expanded ? ' is-expanded' : '') + '" data-mk="notice"' +
+      ' role="status" data-click="openNotice">' +
+    '<img class="notice__logo" src="/static/images/icon-round.png" alt="" width="40" height="40">' +
+    '<div class="notice__body">' +
+      '<div class="notice__head">' +
+        '<span class="notice__name">' + esc(n.title) + '</span>' +
+        '<span class="notice__time">now</span>' +
+        '<button class="notice__x" type="button" aria-label="Close" data-click="closeNotice">' + I.x(16) + '</button>' +
+      '</div>' +
+      hiddenTextHtml('notice__text', 'n' + n.id + (n.expanded ? 'x' : ''), shown, n.hash) +
+      (long ? '<button class="notice__more" type="button" data-click="toggleNotice">' + (n.expanded ? 'Show less' : 'Show more') + '</button>' : '') +
+    '</div>' +
+  '</div>';
+}
+
 function messagesHtml() {
   const s = state;
   const t = peerOf();
@@ -561,10 +610,9 @@ function messagesHtml() {
     } else if (m.bad) {
       content = '<div class="bubble is-bad">' + I.warn + '<span class="bubble__text">' + esc(m.text) + '</span>' + meta + '</div>';
     } else {
-      const rich = CX.md.hasMarkup(m.text);
-      content = '<div class="bubble' + (m.mine ? ' is-mine' : '') + (m.pending ? ' is-pending' : '') + (rich ? ' is-rich' : '') + '">' +
+      content = '<div class="bubble' + (m.mine ? ' is-mine' : '') + (m.pending ? ' is-pending' : '') + '">' +
         (m.forwarded ? '<div class="bubble__fwd">Forwarded</div>' : '') +
-        (rich ? '<div class="bubble__text md">' + CX.md.render(m.text) + '</div>' : '<span class="bubble__text">' + esc(m.text) + '</span>') +
+        hashedTextHtml(m) +
         meta +
       '</div>';
     }
@@ -1103,6 +1151,7 @@ function overlaysHtml() {
   if (s.membersOpen) out += membersSheetHtml();
   if (s.infoOpen) out += infoSheetHtml();
   if (s.profileOpen) out += profileHtml();
+  if (s.notice && !s.gate) out += noticeHtml();
   if (s.toast) {  // последним в слое окон и с наибольшим z-index — поверх любых модалок
     out += '<div class="toast' + (s.toastVisible ? ' is-visible' : '') + '" data-mk="toast">' + esc(s.toast) + '</div>';
   }

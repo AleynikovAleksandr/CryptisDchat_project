@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     backup_threshold: int = 2
     backup_max_pin_attempts: int = 10
 
+    # --- Web Push (уведомления при закрытой вкладке) ---
+    # пусто = Web Push выключен; ключ создаёт: python scripts/gen_vapid_key.py
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:admin@localhost"  # контакт для push-сервисов (RFC 8292)
+
     # --- файлы ---
     uploads_dir: str = "/app/uploads"
     max_upload_bytes: int = 25 * 1024 * 1024

@@ -106,8 +106,17 @@ def realm_clients() -> list[IRealmClient]:
 def push_sender() -> IPushSender:
     if "push" in _overrides:
         return _overrides["push"]
-    from worker.gateways.push import LogPushSender
+    s = get_settings()
+    return _push_sender(s.vapid_private_key, s.vapid_subject)
 
+
+@lru_cache
+def _push_sender(vapid_private_key: str, vapid_subject: str) -> IPushSender:
+    """Один отправитель на процесс: WebPushSender держит пул HTTP-соединений к push-сервисам."""
+    from worker.gateways.push import LogPushSender, WebPushSender
+
+    if vapid_private_key:
+        return WebPushSender(vapid_private_key, vapid_subject, LogPushSender())
     return LogPushSender()
 
 

@@ -222,6 +222,7 @@ async function startApp() {
   routeStart(); // открыть экран из адреса: /app/settings, /app/chat/<id> …
   CX.ws.start({ onFrame: onWsFrame, onRevoked: sessionEnded, onReconnecting: () => set({ connection: 'reconnecting' }) });
   startAutolock();
+  askNotificationPermission();
   clearInterval(expireTimer);
   expireTimer = setInterval(purgeExpired, 5000);
   for (const t of state.threads) if (t.isGroup && t.rotationPending) rotateGroup(t.id);
@@ -239,6 +240,7 @@ function wipeMemory() {
   state.messagesByThread = {};
   state.activeThread = null;
   state.profileOpen = false;
+  state.notice = null;
 }
 
 /* Авто-блокировка по бездействию (настройка «Lock after inactivity»). */
@@ -362,12 +364,22 @@ function toThread(t, prev) {
   });
 }
 
-async function loadThreads() {
-  const list = await API.get('/api/threads');
-  const byId = {};
-  state.threads.forEach((t) => { byId[t.id] = t; });
-  set({ threads: list.map((t) => toThread(t, byId[t.id])), threadsLoaded: true });
-  for (const t of state.threads) if (t.lastMessage) refreshPreview(t, t.lastMessage);
+/* Запросы списка могут перекрываться (WS-события, входящее сообщение, локальные действия).
+ * Применяется только ответ последнего запроса: иначе запоздавший старый ответ затирал бы
+ * список — только что открытый чат пропадал, а удалённый возвращался. */
+let threadsRev = 0;
+let threadsLoad = null;
+function loadThreads() {
+  const rev = ++threadsRev;
+  const p = API.get('/api/threads').then((list) => {
+    if (rev !== threadsRev) return threadsLoad;  // устаревший ответ — ждём самый свежий
+    const byId = {};
+    state.threads.forEach((t) => { byId[t.id] = t; });
+    set({ threads: list.map((t) => toThread(t, byId[t.id])), threadsLoaded: true });
+    for (const t of state.threads) if (t.lastMessage) refreshPreview(t, t.lastMessage);
+  });
+  threadsLoad = p;
+  return p;
 }
 
 let threadsTimer = null;
@@ -605,6 +617,8 @@ async function decodeMessage(t, raw) {
   try {
     // 1) ТЗ 6.2: сначала подпись — сообщение с неверной подписью отбрасывается до расшифровки
     const nonce = CXC.unb64(raw.nonce), ct = CXC.unb64(raw.ciphertext);
+    // SHA-256 шифротекста — его, а не открытый текст, видно в HTML-разметке пузыря
+    base.hash = CXC.hex(await CXC.sha256(ct));
     const pub = await peerSigningKey(raw.sender_id, raw.sender_key_version);
     const ok = await CXC.verify(pub, CXC.unb64(raw.signature), CXC.signingBytes(t.id, raw.client_msg_id, raw.key_epoch, nonce, ct));
     if (!ok) return Object.assign(base, { bad: 'signature', text: 'Message signature is invalid — content hidden.' });
@@ -949,6 +963,104 @@ async function onIncoming(frame, data) {
   }
   bumpThread(t.id);
   render();
+  if (!msg.mine && !msg.bad && !t.muted) notifyMessage(t, msg);
+}
+
+/* ============================================================
+   Уведомления о новых сообщениях
+   Вкладка на экране → карточка в стиле сообщения внутри страницы (её можно оформить);
+   вкладка скрыта → системное уведомление Web Notifications API (его рисует ОС).
+   ============================================================ */
+const NOTICE_MS = 6000;
+let noticeTimer = null, noticeHideTimer = null;
+
+function askNotificationPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') { enablePush(); return; }
+  if (Notification.permission !== 'default') return;
+  // браузеры разрешают запрос только в ответ на действие пользователя
+  const ask = () => {
+    Notification.requestPermission().then((p) => { if (p === 'granted') enablePush(); }).catch(() => {});
+  };
+  document.addEventListener('pointerdown', ask, { once: true });
+}
+
+/* Web Push: service worker показывает уведомление, даже когда вкладка закрыта. */
+let swReady = null;
+function serviceWorker() {
+  if (!swReady && 'serviceWorker' in navigator) {
+    swReady = navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((e) => {
+      console.warn('service worker', e);
+      return null;
+    });
+    // клик по push-уведомлению при уже открытой вкладке — открыть нужный чат
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'open-thread' && e.data.threadId && !state.gate) openThread(e.data.threadId);
+    });
+  }
+  return swReady || Promise.resolve(null);
+}
+
+const sameKey = (a, b) => !!a && a.byteLength === b.byteLength && new Uint8Array(a).every((x, i) => x === b[i]);
+
+async function enablePush() {
+  try {
+    const reg = await serviceWorker();
+    if (!reg || !('PushManager' in window) || Notification.permission !== 'granted') return;
+    let key;
+    try { key = (await API.get('/api/push/vapid-public-key')).public_key; } catch (e) { return; }  // Web Push не настроен
+    const appKey = CXC.unb64(key.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((key.length + 3) % 4));
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && !sameKey(sub.options.applicationServerKey, appKey)) { await sub.unsubscribe(); sub = null; }  // сменили VAPID-ключ
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+    const json = sub.toJSON();
+    await API.post('/api/me/push-token', {
+      platform: 'webpush', token: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
+    });
+  } catch (e) {
+    console.warn('web push', e);
+  }
+}
+
+function notifyMessage(t, msg) {
+  const visible = !document.hidden && document.hasFocus();
+  if (visible && state.activeThread === t.id) return;  // чат и так открыт перед глазами
+  const sender = t.isGroup ? (memberName(t.id, msg.senderId) || 'Someone') + ' · ' + t.name : t.name;
+  const text = msg.file ? '📎 ' + msg.file.base + msg.file.ext : CX.md.plain(msg.text);
+  if (visible) showNotice({ id: msg.id, threadId: t.id, title: sender, text, hash: msg.hash });
+  else systemNotify(t.id, sender, text);
+}
+
+async function systemNotify(threadId, title, text) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const options = {
+    body: text.length > 180 ? text.slice(0, 180).trimEnd() + '…' : text,
+    icon: '/static/images/icon-round.png', tag: 'cx-' + threadId, renotify: true, data: { threadId },
+  };
+  // через service worker уведомления работают и на Android, а клик обрабатывает sw.js
+  const reg = await serviceWorker();
+  if (reg) { reg.showNotification(title, options).catch(() => {}); return; }
+  try {
+    const n = new Notification(title, options);
+    n.onclick = () => { window.focus(); openThread(threadId); n.close(); };
+  } catch (e) { /* браузер без service worker и без конструктора Notification */ }
+}
+
+function showNotice(notice) {
+  clearTimeout(noticeTimer);
+  clearTimeout(noticeHideTimer);
+  setState({ notice: Object.assign({ expanded: false, visible: false }, notice) });
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (state.notice && state.notice.id === notice.id) setState({ notice: Object.assign({}, state.notice, { visible: true }) });
+  }));
+  noticeTimer = setTimeout(hideNotice, NOTICE_MS);
+}
+
+function hideNotice() {
+  clearTimeout(noticeTimer);
+  if (!state.notice) return;
+  setState({ notice: Object.assign({}, state.notice, { visible: false }) });
+  noticeHideTimer = setTimeout(() => setState({ notice: null }), 220);
 }
 
 /* Индикатор «печатает…»: не чаще раза в 3 секунды. */

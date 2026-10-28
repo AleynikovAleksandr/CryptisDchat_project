@@ -23,7 +23,7 @@ const state = {
   groupStep: 'pick', groupName: '', groupPhoto: '', groupPhotoFile: null, membersOpen: false,
   groupPermQuery: '', blacklistQuery: '', blacklistFocus: false,
   sidebarOpen: true, deleteMediaOpen: false,
-  toast: null, toastVisible: false,
+  toast: null, toastVisible: false, notice: null,
   replyDraft: null, forwardOpen: false, forwardQuery: '', forwardFocus: false, forwardMsgId: null,
   infoOpen: false, infoMsgId: null, info: null,
   editName: '', editHandle: '', profileTarget: 'thread',

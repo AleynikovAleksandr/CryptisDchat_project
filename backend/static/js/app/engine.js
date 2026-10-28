@@ -131,6 +131,7 @@ function render() {
     patch(elMain, state.gate ? gateHtml() : mainHtml());
     patch(elOverlays, overlaysHtml());
   } finally {
+    flushHiddenText();
     rendering = false;
   }
   if (dirty) { dirty = false; render(); return; }

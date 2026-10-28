@@ -1,4 +1,4 @@
-"""Очередь `notifications` — push через APNs/FCM (Gunicorn_Celery.md 4.6).
+"""Очередь `notifications` — push через Web Push / APNs / FCM (Gunicorn_Celery.md 4.6).
 
 Текст сообщения сервер не знает: в push уходит безопасный фрагмент от клиента или «New message».
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 from sqlalchemy import delete, select
 
 from app.interfaces.push import PushMessage
-from app.models import PushToken
+from app.models import Device, PushToken
 from worker.celery_app import celery_app
 from worker.runtime import db, push_sender
 
@@ -17,7 +17,11 @@ def send_push(user_id: str, title: str, body: str, data: dict) -> int:
     sender = push_sender()
     sent = 0
     with db() as session:
-        tokens = list(session.scalars(select(PushToken).where(PushToken.user_id == user_id)))
+        # завершённые сессии («End session», «Log out of all devices») уведомлений не получают
+        tokens = list(session.scalars(
+            select(PushToken).join(Device, Device.id == PushToken.device_id)
+            .where(PushToken.user_id == user_id, Device.revoked_at.is_(None))
+        ))
         invalid: list[str] = []
         for t in tokens:
             ok = sender.send(PushMessage(token=t.token, platform=t.platform, title=title[:80], body=body[:120],

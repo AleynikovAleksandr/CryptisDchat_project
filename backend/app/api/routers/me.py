@@ -10,11 +10,12 @@ from app.repositories import SettingsRepository, UserRepository
 from app.schemas.users import MePatchIn, MeOut, PushTokenIn, ReportIn, UserPublicOut
 from app.services import cache
 from app.services.auth_service import AuthService
-from app.services.errors import NotFound
+from app.services.errors import Invalid, NotFound
 from app.services.infra import Infra
 from app.services.message_service import MessageService, update_profile
 from app.services.presenters import user_public
 from app.services.settings_service import SettingsService
+from app.services.webpush import parse_subscription, vapid_public_key
 
 router = APIRouter(prefix="/api", tags=["profile"])
 
@@ -46,8 +47,21 @@ async def upload_avatar(file: UploadFile = File(...), cu: CurrentUser = Depends(
 @router.post("/me/push-token", status_code=204)
 async def push_token(body: PushTokenIn, cu: CurrentUser = Depends(current_user),
                      session: AsyncSession = Depends(get_session)):
+    if body.platform == "webpush":
+        try:
+            parse_subscription(body.token)
+        except ValueError as e:
+            raise Invalid(str(e)) from e
     await UserRepository(session).upsert_push_token(cu.user.id, cu.device_id, body.platform, body.token)
     await session.commit()
+
+
+@router.get("/push/vapid-public-key")
+async def vapid_key(cu: CurrentUser = Depends(current_user), infra: Infra = Depends(get_infra)) -> dict:
+    """applicationServerKey для подписки браузера на Web Push; 404 — Web Push не настроен."""
+    if not infra.settings.vapid_private_key:
+        raise NotFound("web push is not configured")
+    return {"public_key": vapid_public_key(infra.settings.vapid_private_key)}
 
 
 @router.get("/contacts", response_model=list[UserPublicOut])
