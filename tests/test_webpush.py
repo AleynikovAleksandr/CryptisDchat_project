@@ -90,6 +90,9 @@ def test_sender_posts_encrypted_payload_and_drops_gone_subscriptions():
 
 async def test_push_token_api_validates_webpush_and_serves_vapid_key(make_user, infra, monkeypatch):
     user = await make_user()
+    monkeypatch.setenv("VAPID_PRIVATE_KEY", "")  # переменная окружения важнее ключа из локального .env
+    get_settings.cache_clear()
+    infra.settings = get_settings()
     assert (await user.get("/api/push/vapid-public-key")).status_code == 404  # не настроен
     key = webpush.generate_vapid_private_key()
     monkeypatch.setenv("VAPID_PRIVATE_KEY", key)

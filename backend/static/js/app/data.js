@@ -1023,12 +1023,14 @@ async function enablePush() {
 }
 
 function notifyMessage(t, msg) {
-  const visible = !document.hidden && document.hasFocus();
-  if (visible && state.activeThread === t.id) return;  // чат и так открыт перед глазами
+  const onScreen = !document.hidden;            // вкладка показана (пусть и в окне без фокуса)
+  const focused = onScreen && document.hasFocus();
+  if (focused && state.activeThread === t.id) return;  // чат и так открыт перед глазами
   const sender = t.isGroup ? (memberName(t.id, msg.senderId) || 'Someone') + ' · ' + t.name : t.name;
-  const text = msg.file ? '📎 ' + msg.file.base + msg.file.ext : CX.md.plain(msg.text);
-  if (visible) showNotice({ id: msg.id, threadId: t.id, title: sender, text, hash: msg.hash });
-  else systemNotify(t.id, sender, text);
+  const text = msg.file ? '📎 ' + msg.file.base + msg.file.ext : msg.text;
+  // карточка — всегда, когда вкладку видно; системное — когда окно не в фокусе
+  if (onScreen) showNotice({ id: msg.id, threadId: t.id, title: sender, text, hash: msg.hash });
+  if (!focused) systemNotify(t.id, sender, text);
 }
 
 async function systemNotify(threadId, title, text) {

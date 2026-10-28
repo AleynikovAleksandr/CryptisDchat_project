@@ -28,6 +28,8 @@ RUN pip install "/tmp/project[backend]" && rm -rf /tmp/project
 COPY backend/ /app/
 # исходники JS в образ не попадают: страницы подключают только static/dist/<страница>.<хеш>.js
 RUN rm -rf /app/static/js
+# service worker в бандл не входит: браузер грузит его отдельным файлом по адресу /sw.js
+COPY backend/static/js/sw.js /app/static/js/sw.js
 COPY --from=frontend /build/out/static/ /app/static/
 COPY --from=frontend /build/out/templates/ /app/templates/
 
