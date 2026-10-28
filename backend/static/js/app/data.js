@@ -681,7 +681,8 @@ async function postPacket(t, content, extra, optimistic) {
   const clientId = CXC.uuid();
   const localId = 'local-' + clientId;
   const time = new Date();
-  addLocal(t.id, Object.assign({ id: localId, seq: Number.MAX_SAFE_INTEGER, mine: true, pending: true, time,
+  // clientId черновика совпадёт с client_msg_id в message.new — по нему onIncoming узнаёт своё сообщение
+  addLocal(t.id, Object.assign({ id: localId, clientId, seq: Number.MAX_SAFE_INTEGER, mine: true, pending: true, time,
                                  meta: formatMsgTime(time), senderId: S.userId, text: '' }, optimistic));
   try {
     const packet = await sealPacket(t, content, Object.assign({ clientId }, extra));
@@ -940,11 +941,14 @@ async function onIncoming(frame, data) {
   if (!t) { await loadThreads(); t = threadById(raw.thread_id); if (!t) return; fresh = true; }
   if (raw.sender_id !== S.userId) CX.ws.send('ack.delivered', { thread_id: raw.thread_id, seq: raw.seq });
 
-  const list = state.messagesByThread[raw.thread_id];
-  const already = list && list.some((m) => m.id === raw.id || (m.clientId === raw.client_msg_id && !m.pending));
-  if (already) return;
+  const seen = (list) => list && list.some((m) => m.id === raw.id || (m.clientId === raw.client_msg_id && !m.pending));
+  if (seen(state.messagesByThread[raw.thread_id])) return;
   if (t.isGroup) await ensureMembers(t.id);
   const msg = await decodeMessage(t, raw);
+  // пока расшифровывали, список мог измениться (ответ на свой POST, повторный кадр после
+  // переподключения) — берём текущий, а не снимок до await, иначе вернётся черновик и будет дубль
+  const list = state.messagesByThread[raw.thread_id];
+  if (seen(list)) return;
   if (list) {
     const stick = isNearBottom();
     state.messagesByThread[raw.thread_id] = list.filter((m) => m.clientId !== raw.client_msg_id)
