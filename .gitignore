@@ -1,6 +1,5 @@
 # окружение и секреты
 .venv/
-.env
 worker.env
 realm.env
 
