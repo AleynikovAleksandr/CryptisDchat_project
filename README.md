@@ -128,7 +128,7 @@ start** with weak secrets or with the dev sign-in enabled.
 All three files are in `.gitignore`, with `600` permissions.
 
 **Web Push** (notifications when the app tab is closed) — add to `.env` the lines printed by
-`python scripts/gen_vapid_key.py`: `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (`mailto:` contact for push services).
+`python scripts/helpers/gen_vapid_key.py`: `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (`mailto:` contact for push services).
 Without `VAPID_PRIVATE_KEY` Web Push is off and the worker only logs notifications. Changing the key makes
 every browser re-subscribe on its next visit.
 
@@ -136,7 +136,7 @@ every browser re-subscribe on its next visit.
 
 ```bash
 python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python scripts/dev_server.py
+.venv/bin/python scripts/helpers/dev_server.py
 ```
 
 Starts everything in one terminal: a real Redis (the `redislite` pip package), SQLite instead of MariaDB,
@@ -164,7 +164,7 @@ end-to-end encryption and server-side checks, not on hiding the client.
 ```bash
 .venv/bin/python -m pytest                      # API, worker, WS, crypto compatibility
 .venv/bin/python -m playwright install chromium # once
-.venv/bin/python scripts/dev_server.py &        # stack for the browser scenario
+.venv/bin/python scripts/helpers/dev_server.py &        # stack for the browser scenario
 .venv/bin/python tests/e2e/e2e_browser.py       # end-to-end scenario in Chromium (4 browser profiles)
 .venv/bin/python tests/e2e/e2e_mobile.py        # phone flows, PIN and layouts (390×844 and 320×700)
 # If Chromium is unavailable but Chrome is installed: add --channel chrome

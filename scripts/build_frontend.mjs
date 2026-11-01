@@ -7,7 +7,7 @@
  *
  * В <каталог> пишутся templates/*.html (с одним тегом вместо списка скриптов),
  * static/dist/*.js. Исходники в репозитории
- * не меняются: локальная разработка (scripts/dev_server.py) работает с ними как раньше.
+ * не меняются: локальная разработка (scripts/helpers/dev_server.py) работает с ними как раньше.
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

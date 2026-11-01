@@ -1,6 +1,6 @@
 """Мобильная раскладка в настоящем браузере (Playwright, Chromium, экран телефона 390×844, касания).
 
-    .venv/bin/python scripts/dev_server.py &      # поднять стек
+    .venv/bin/python scripts/helpers/dev_server.py &      # поднять стек
     .venv/bin/python tests/e2e/e2e_mobile.py [--shots DIR] [--channel chrome]
 
 Проверяет: вход и восстановление ключей, чаты и группы, поиск, пересылку и файлы,

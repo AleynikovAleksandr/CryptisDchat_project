@@ -1,6 +1,6 @@
-"""Сквозной сценарий в настоящем браузере (Playwright, Chromium) против scripts/dev_server.py.
+"""Сквозной сценарий в настоящем браузере (Playwright, Chromium) против scripts/helpers/dev_server.py.
 
-    .venv/bin/python scripts/dev_server.py &      # поднять стек
+    .venv/bin/python scripts/helpers/dev_server.py &      # поднять стек
     .venv/bin/python tests/e2e/e2e_browser.py [--shots DIR]
 
 Два изолированных браузерных профиля — Алиса и Боб:

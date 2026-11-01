@@ -422,6 +422,7 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
 .setup-profile-hint { padding: 0 4px; color: #536471; font-size: 12.5px; line-height: 1.35; }
 .setup-profile-next { width: 100%; margin-top: 4px; }
 .setup-profile-next:disabled { opacity: 0.45; cursor: default; }
+.setup-profile-back { align-self: center; margin-top: 6px; padding: 2px 12px; font-size: 13px; }
 
 /* ============================================================
    9. ПУСТОЙ ЧАТ

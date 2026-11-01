@@ -50,6 +50,7 @@ function gateHtml() {
       '<div class="setup-profile-hint">3–15 letters, numbers, underscores or dots.</div>' +
       '<button class="btn-dark setup-profile-next" type="button" data-click="submitSetupProfile"' +
         (ready && !g.busy ? '' : ' disabled') + '>' + (g.busy ? 'Saving…' : 'Continue') + '</button>' +
+      '<button class="gate-link setup-profile-back" type="button" data-click="gateBack">Back</button>' +
     '</div>';
   } else if (needsPin) {
     body = dotsHtml(g.pin, g.error) +
@@ -63,7 +64,7 @@ function gateHtml() {
   }
   const foot = g.mode.startsWith('pairing-pin')
     ? '<button class="gate-link" type="button" data-click="cancelPairing">Cancel</button>'
-    : g.mode === 'profile-setup' || g.mode === 'unlock' || g.mode === 'restore' || g.mode === 'reset'
+    : g.mode === 'unlock' || g.mode === 'restore' || g.mode === 'reset'
     ? '<button class="gate-link" type="button" data-click="gateOtherAccount">Switch wallet</button>' : '';
   return '<div class="passcode-screen gate" data-mk="gate-' + g.mode + '" data-click="focusGate">' +
     '<div class="passcode-body">' +

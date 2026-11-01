@@ -22,6 +22,7 @@ H.focusGate = () => {
 };
 H.gateReset = () => setState({ gate: { mode: 'setup', pin: '', reset: true } });
 H.gateOtherAccount = () => logout();
+H.gateBack = () => backToLogin();
 
 const validSetupUsername = (value) => /^[a-zA-Z0-9_.]{3,15}$/.test((value || '').replace(/^@/, ''));
 H.onSetupProfile = (e) => {

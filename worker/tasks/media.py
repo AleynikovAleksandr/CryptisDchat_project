@@ -62,11 +62,10 @@ def delete_files(paths: list[str]) -> int:
 
 @celery_app.task(name="media.delete_all_for_user")
 def delete_all_for_user(user_id: str) -> int:
-    """«Delete all media» (/api/settings/delete-media)."""
+    """Удалить все файлы пользователя, включая аватары и групповые аватары."""
     with db() as session:
         rows = list(session.scalars(
-            select(Attachment).where(Attachment.owner_id == user_id, Attachment.kind.in_(("file", "thumbnail")),
-                                     Attachment.deleted_at.is_(None))
+            select(Attachment).where(Attachment.owner_id == user_id, Attachment.deleted_at.is_(None))
         ))
         count = _delete(rows)
         session.commit()

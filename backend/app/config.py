@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     backup_max_pin_attempts: int = 10
 
     # --- Web Push (уведомления при закрытой вкладке) ---
-    # пусто = Web Push выключен; ключ создаёт: python scripts/gen_vapid_key.py
+    # пусто = Web Push выключен; ключ создаёт: python scripts/helpers/gen_vapid_key.py
     vapid_private_key: str = ""
     vapid_subject: str = "mailto:admin@localhost"  # контакт для push-сервисов (RFC 8292)
 

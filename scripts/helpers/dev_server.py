@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Локальный запуск всего CryptisDchat без Docker — для разработки и ручной проверки.
 
-    .venv/bin/python scripts/dev_server.py
+    .venv/bin/python scripts/helpers/dev_server.py
 
 Поднимает в одном процессе (и двух дочерних для Celery):
   * Redis 6 (pip-пакет redislite; иначе fakeredis)   127.0.0.1:6399
@@ -23,7 +23,7 @@ import threading
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data_warehouses" / "dev"
 DATA.mkdir(parents=True, exist_ok=True)
 sys.path[:0] = [str(ROOT / "backend"), str(ROOT)]

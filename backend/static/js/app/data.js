@@ -303,6 +303,26 @@ async function logout() {
   location.replace('/login?reauth=1');
 }
 
+async function backToLogin() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1200);
+  try {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: API.session.access ? { Authorization: 'Bearer ' + API.session.access } : {},
+      signal: controller.signal,
+    });
+  } catch (e) {
+    // Возврат на вход должен сработать и при недоступности API.
+  } finally {
+    clearTimeout(timer);
+  }
+  wipeMemory(); // Сохраняет PIN-хранилище, в отличие от полного выхода.
+  S.handoff = null;
+  sessionStorage.removeItem('cx_login');
+  location.replace('/login?reauth=1');
+}
+
 /* ============================================================
    Профиль и настройки
    ============================================================ */

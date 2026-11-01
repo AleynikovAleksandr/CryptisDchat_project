@@ -40,7 +40,7 @@ backend = [
     "httpx==0.28.1",
     "pywebpush==2.0.3",
 ]
-# тесты и локальный запуск без Docker (scripts/dev_server.py, браузерные E2E): pip install -e ".[dev]"
+# тесты и локальный запуск без Docker (scripts/helpers/dev_server.py, браузерные E2E): pip install -e ".[dev]"
 dev = [
     "cryptisdchat[backend]",
     "pytest==9.1.1",
@@ -57,7 +57,7 @@ dev = [
 Documentation = "https://drive.google.com/drive/folders/1jvNFLmGvsCVsGoeSogor_gkPvS4btj1P?usp=sharing"
 
 # Это приложение, а не библиотека: код запускается из backend/, worker/ и realm/ (Docker-образы,
-# scripts/dev_server.py), поэтому `pip install -e ".[dev]"` ставит только зависимости.
+# scripts/helpers/dev_server.py), поэтому `pip install -e ".[dev]"` ставит только зависимости.
 [tool.setuptools]
 packages = []
 
