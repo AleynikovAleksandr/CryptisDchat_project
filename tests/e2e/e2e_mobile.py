@@ -123,6 +123,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=None)
     ap.add_argument("--channel", default=None, help="Installed browser channel, e.g. chrome")
+    ap.add_argument("--pairing-only", action="store_true", help="Offline pairing UI and WebCrypto integration")
     args = ap.parse_args()
     shots = Path(args.shots) if args.shots else None
     if shots:
@@ -136,6 +137,11 @@ def main() -> int:
     errors: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(channel=args.channel)
+        if args.pairing_only:
+            from pairing_checks import check_pairing
+            check_pairing(browser, mobile=True)
+            browser.close()
+            return 0
         alice, bob = (browser.new_context(**PHONE).new_page() for _ in range(2))
         carol = browser.new_context(**PHONE, timezone_id="Pacific/Honolulu").new_page()
 

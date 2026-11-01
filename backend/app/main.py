@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 
-from app.api.routers import auth, groups, keys, me, messages, pages, settings, threads, ws
+from app.api.routers import auth, groups, keys, me, messages, pages, settings, threads, webhooks, ws
 from app.config import get_settings
 from app.repositories.database import dispose_engine, get_engine
 from app.services.errors import DomainError
@@ -31,7 +31,7 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Permissions-Policy": "camera=(self), microphone=(), geolocation=()",
 }
 # TonConnect UI грузится с jsDelivr и открывает мосты кошельков — разрешаем только их
 CSP = (
@@ -111,7 +111,7 @@ def create_app(infra: Infra | None = None) -> FastAPI:
         return response
 
     for r in (auth.router, me.router, threads.router, groups.router, messages.router,
-              settings.router, keys.router, ws.router, pages.router):
+              settings.router, keys.router, ws.router, pages.router, webhooks.router):
         app.include_router(r)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

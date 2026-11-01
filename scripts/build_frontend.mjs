@@ -6,20 +6,18 @@
  *   node scripts/build_frontend.mjs --out <каталог>
  *
  * В <каталог> пишутся templates/*.html (с одним тегом вместо списка скриптов),
- * static/dist/*.js и минифицированный static/js/admin-login.js. Исходники в репозитории
+ * static/dist/*.js. Исходники в репозитории
  * не меняются: локальная разработка (scripts/dev_server.py) работает с ними как раньше.
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transform } from 'esbuild';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BACKEND = join(ROOT, 'backend');
 const PAGES = ['login.html', 'cryptis.html'];
-const STANDALONE = ['js/admin-login.js'];  // подключается из Flask-шаблона по url_for — имя не меняем
-
 const outArg = process.argv.indexOf('--out');
 if (outArg < 0 || !process.argv[outArg + 1]) {
   console.error('usage: node scripts/build_frontend.mjs --out <dir>');
@@ -57,11 +55,4 @@ for (const page of PAGES) {
   mkdirSync(join(OUT, 'templates'), { recursive: true });
   writeFileSync(join(OUT, 'templates', page), built);
   console.log(`${page}: ${files.length} scripts -> static/dist/${name} (${(code.length / 1024).toFixed(1)} KB)`);
-}
-
-for (const f of STANDALONE) {
-  const code = await minify(readFileSync(join(BACKEND, 'static', f), 'utf8'));
-  mkdirSync(dirname(join(OUT, 'static', f)), { recursive: true });
-  writeFileSync(join(OUT, 'static', f), code);
-  console.log(`${f}: minified (${(code.length / 1024).toFixed(1)} KB)`);
 }

@@ -1,12 +1,10 @@
 """Личные и групповые чаты: список, настройки чата, квитанции доставки и прочтения."""
 from __future__ import annotations
 
-from datetime import timedelta
-
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Message, Thread, ThreadMember, User, utcnow
+from app.models import Thread, ThreadMember, User, utcnow
 from app.repositories import KeyRepository, MessageRepository, SettingsRepository, ThreadRepository, UserRepository
 from app.schemas.threads import MemberOut, ThreadDetailOut, ThreadOut
 from app.services import cache
@@ -187,14 +185,6 @@ class ThreadService:
         member.last_read_seq = target
         member.last_delivered_seq = max(member.last_delivered_seq, target)
         now = utcnow()
-        if thread.disappearing_seconds:
-            # «After messages in this chat get read, they will vanish after the selected time»
-            await self.s.execute(
-                update(Message)
-                .where(Message.thread_id == thread.id, Message.seq > previous, Message.seq <= target,
-                       Message.sender_id != user.id, Message.expires_at.is_(None))
-                .values(expires_at=now + timedelta(seconds=thread.disappearing_seconds))
-            )
         if (await self.settings.get(user.id)).send_read_receipts:
             chain.record_receipt("message.read", thread.id, user.id, target, now)
             return True

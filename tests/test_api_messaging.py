@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import os
+from datetime import datetime
 
 from app.proto import wire
 from app.services import merkle
@@ -177,7 +178,7 @@ async def test_clear_delete_mute_and_disappearing(make_user, infra):
     alice, bob = await make_user(), await make_user()
     thread_id, conv_key = await open_dm(alice, bob)
     p = cc.make_packet(alice.keys, thread_id, conv_key, 1, {"text": "old"})
-    await alice.post(f"/api/threads/{thread_id}/messages", p)
+    old_msg = (await alice.post(f"/api/threads/{thread_id}/messages", p)).json()
 
     assert (await bob.post(f"/api/threads/{thread_id}/clear")).status_code == 204
     assert (await bob.get(f"/api/threads/{thread_id}/messages")).json()["items"] == []
@@ -186,7 +187,7 @@ async def test_clear_delete_mute_and_disappearing(make_user, infra):
     assert (await bob.delete(f"/api/threads/{thread_id}")).status_code == 204
     assert (await bob.get("/api/threads")).json() == []
     p = cc.make_packet(alice.keys, thread_id, conv_key, 1, {"text": "new"})
-    await alice.post(f"/api/threads/{thread_id}/messages", p)
+    new_msg = (await alice.post(f"/api/threads/{thread_id}/messages", p)).json()
     assert len((await bob.get("/api/threads")).json()) == 1  # новое сообщение возвращает чат
 
     assert (await bob.post(f"/api/threads/{thread_id}/mute", {"muted": True})).status_code == 204
@@ -196,6 +197,9 @@ async def test_clear_delete_mute_and_disappearing(make_user, infra):
                                      headers=alice.h)).status_code == 204
     p = cc.make_packet(alice.keys, thread_id, conv_key, 1, {"text": "vanish"})
     m = (await alice.post(f"/api/threads/{thread_id}/messages", p)).json()
+    assert m["expires_at"] is not None
+    assert abs((datetime.fromisoformat(m["expires_at"]) - datetime.fromisoformat(m["created_at"])).total_seconds() - 300) < 1
+    assert old_msg["expires_at"] is None and new_msg["expires_at"] is None
     await bob.post(f"/api/threads/{thread_id}/read", {})
     items = (await bob.get(f"/api/threads/{thread_id}/messages")).json()["items"]
     vanishing = next(i for i in items if i["id"] == m["id"])

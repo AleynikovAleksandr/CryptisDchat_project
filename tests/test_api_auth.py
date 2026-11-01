@@ -1,6 +1,8 @@
 """ТЗ 4.2: ton_proof → UUID-пользователь → JWT + Refresh, авто-вход, отзыв сессий."""
 from __future__ import annotations
 
+import pytest
+
 from tests import client_crypto as cc
 from tests.conftest import login
 
@@ -47,20 +49,63 @@ async def test_refresh_rotates_and_detects_reuse(client):
     assert me.status_code == 401 and me.json()["error"] == "token_revoked"
 
 
-async def test_logout_all_revokes_every_device(client):
+@pytest.mark.parametrize("with_revoked_device", [False, True])
+async def test_cannot_end_last_active_session(client, with_revoked_device):
+    wallet = cc.DevWallet()
+    a = await login(client, wallet)
+    headers = {"Authorization": f"Bearer {a['access_token']}"}
+    if with_revoked_device:
+        b = await login(client, wallet)
+        assert (await client.post("/api/auth/logout", headers={"Authorization": f"Bearer {b['access_token']}"})).status_code == 204
+    device_id = (await client.get("/api/auth/sessions", headers=headers)).json()[0]["device_id"]
+
+    response = await client.delete(f"/api/auth/sessions/{device_id}", headers=headers)
+
+    assert response.status_code == 409 and response.json()["error"] == "last_device"
+    assert (await client.get("/api/me", headers=headers)).status_code == 200
+    assert (await client.post("/api/auth/refresh", json={"refresh_token": a["refresh_token"]})).status_code == 200
+
+
+@pytest.mark.parametrize("with_revoked_device", [False, True])
+async def test_cannot_logout_last_active_session(client, with_revoked_device):
+    wallet = cc.DevWallet()
+    a = await login(client, wallet)
+    headers = {"Authorization": f"Bearer {a['access_token']}"}
+    if with_revoked_device:
+        b = await login(client, wallet)
+        assert (await client.post("/api/auth/logout", headers={"Authorization": f"Bearer {b['access_token']}"})).status_code == 204
+
+    response = await client.post("/api/auth/logout", headers=headers)
+
+    assert response.status_code == 409 and response.json()["error"] == "last_device"
+    assert (await client.get("/api/me", headers=headers)).status_code == 200
+    assert (await client.post("/api/auth/refresh", json={"refresh_token": a["refresh_token"]})).status_code == 200
+
+
+async def test_logout_all_keeps_current_device(client):
     wallet = cc.DevWallet()
     a = await login(client, wallet)
     b = await login(client, wallet)
+    c = await login(client, wallet)
+    other = await login(client)
     ha = {"Authorization": f"Bearer {a['access_token']}"}
     sessions = (await client.get("/api/auth/sessions", headers=ha)).json()
-    assert len(sessions) == 2 and sum(s["current"] for s in sessions) == 1
+    assert len(sessions) == 3 and sum(s["current"] for s in sessions) == 1
+    current_id = next(s["device_id"] for s in sessions if s["current"])
 
     assert (await client.post("/api/auth/logout-all", headers=ha)).status_code == 204
-    for token in (a["access_token"], b["access_token"]):
+    assert (await client.get("/api/me", headers=ha)).status_code == 200
+    assert [s["device_id"] for s in (await client.get("/api/auth/sessions", headers=ha)).json()] == [current_id]
+    assert (await client.post("/api/auth/refresh", json={"refresh_token": a["refresh_token"]})).status_code == 200
+    for data in (b, c):
+        token = data["access_token"]
         r = await client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 401
-    r = await client.post("/api/auth/refresh", json={"refresh_token": b["refresh_token"]})
-    assert r.status_code == 401
+        r = await client.post("/api/auth/refresh", json={"refresh_token": data["refresh_token"]})
+        assert r.status_code == 401
+    assert (await client.get("/api/me", headers={"Authorization": f"Bearer {other['access_token']}"})).status_code == 200
+    assert (await client.post("/api/auth/logout-all", headers=ha)).status_code == 204
+    assert (await client.get("/api/me", headers=ha)).status_code == 200
 
 
 async def test_logout_single_device_keeps_others(client):
@@ -122,12 +167,14 @@ async def test_relogin_after_logout_revives_device_but_not_old_tokens(client):
     a = await login(client, wallet)
     ha = {"Authorization": f"Bearer {a['access_token']}"}
     device_id = (await client.get("/api/auth/sessions", headers=ha)).json()[0]["device_id"]
+    keeper = await login(client, wallet)
     assert (await client.post("/api/auth/logout", headers=ha)).status_code == 204
 
     b = await login(client, wallet, device_cookie=a["_device"])
     hb = {"Authorization": f"Bearer {b['access_token']}"}
     sessions = (await client.get("/api/auth/sessions", headers=hb)).json()
-    assert [s["device_id"] for s in sessions] == [device_id]
+    assert device_id in [s["device_id"] for s in sessions] and len(sessions) == 2
+    assert (await client.get("/api/me", headers={"Authorization": f"Bearer {keeper['access_token']}"})).status_code == 200
     # JWT, выданный до выхода, остаётся отозванным
     r = await client.get("/api/me", headers=ha)
     assert r.status_code == 401 and r.json()["error"] == "token_revoked"
@@ -179,6 +226,7 @@ async def test_security_headers_on_pages(client):
     assert r.headers["x-frame-options"] == "DENY"
     r = await client.get("/app")
     assert r.status_code == 200
+    assert r.headers["permissions-policy"].split(",", 1)[0].strip() == "camera=(self)"
 
 
 async def test_app_screens_have_own_urls(client):

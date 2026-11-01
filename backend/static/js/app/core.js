@@ -7,6 +7,9 @@
 'use strict';
 
 const BLUE = 'hsl(204 88% 53%)';
+const storedSidebarWidth = Number(localStorage.getItem('cx-sidebar-width'));
+const initialSidebarWidth = Number.isFinite(storedSidebarWidth) && storedSidebarWidth >= 240 && storedSidebarWidth <= 520
+  ? storedSidebarWidth : 358;
 
 /* ============================================================
    Состояние
@@ -17,14 +20,16 @@ const state = {
   navDir: 'forward', searchOpen: false, view: 'chat', query: '', msgQuery: '',
   msgSearchFocus: false, newSearchFocus: false,
   draft: '', hoverId: null, menuId: null, menuPos: null, activeThread: null,
+  emojiPicker: null, emojiQuery: '', emojiCategory: 'Smileys & people', emojiPos: null, emojiSelection: null,
   focusField: null, attachments: [], searchFocus: false,
   newOpen: false, newQuery: '', moreOpen: false, profileClosing: false,
   groupOpen: false, groupQuery: '', groupSearchFocus: false, groupSelected: [],
   groupStep: 'pick', groupName: '', groupPhoto: '', groupPhotoFile: null, membersOpen: false,
   groupPermQuery: '', blacklistQuery: '', blacklistFocus: false,
-  sidebarOpen: true, deleteMediaOpen: false,
+  sidebarOpen: true, sidebarWidth: initialSidebarWidth, fileDropActive: false, deleteMediaOpen: false,
   toast: null, toastVisible: false, notice: null,
   notifyPermission: typeof Notification === 'function' ? Notification.permission : 'unsupported',
+  notificationsEnabled: localStorage.getItem('cx-notifications-enabled') !== 'false',
   replyDraft: null, forwardOpen: false, forwardQuery: '', forwardFocus: false, forwardMsgId: null,
   infoOpen: false, infoMsgId: null, info: null,
   editName: '', editHandle: '', profileTarget: 'thread',

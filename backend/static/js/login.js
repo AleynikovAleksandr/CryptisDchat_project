@@ -55,7 +55,7 @@
   }
 
   async function verify(body) {
-    body.device_name = deviceName();
+    body.device_name = window.CX.deviceInfo.detect(navigator.userAgent, navigator.maxTouchPoints).label;
     const r = await fetch('/api/auth/ton-proof/verify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
@@ -68,15 +68,6 @@
       is_new_user: data.is_new_user, at: Date.now(),
     }));
     location.replace('/app');
-  }
-
-  function deviceName() {
-    const ua = navigator.userAgent;
-    const browser = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox'
-      : /Safari\//.test(ua) ? 'Safari' : 'Browser';
-    const os = /Mac OS X/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android'
-      : /iPhone|iPad/.test(ua) ? 'iOS' : /Linux/.test(ua) ? 'Linux' : '';
-    return (browser + (os ? ' on ' + os : '')).slice(0, 100);
   }
 
   /* ---------------- TonConnect ---------------- */
@@ -183,6 +174,11 @@
 
   // Web Crypto (crypto.subtle) браузер даёт только на HTTPS и localhost: по http://IP шифрование недоступно
   const INSECURE = !window.isSecureContext || !(window.crypto && window.crypto.subtle);
+
+  document.getElementById('pairing-login-btn').addEventListener('click', () => {
+    if (INSECURE) { fail(); return; }
+    location.assign('/app?pair=1');
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

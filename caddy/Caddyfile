@@ -2,7 +2,7 @@
 # Web Crypto (crypto.subtle) браузер даёт только на HTTPS или localhost, поэтому по внешнему
 # адресу приложение работает только через этот вход.
 #
-#   :3443 → backend (приложение, API, WebSocket)      :3444 → admin (Flask-панель)
+#   :3443 → backend (приложение, API, WebSocket)
 #   :80   → только проверка ACME HTTP-01: Let's Encrypt подтверждает, что IP наш
 #
 # Сертификат на IP Let's Encrypt выдаёт только с профилем shortlived — он живёт ~6 дней (160 ч),
@@ -37,27 +37,13 @@
 	}
 }
 
-(admin_panel) {
-	reverse_proxy {$ADMIN_UPSTREAM:admin:8001}
-}
-
 https://{$HTTPS_HOST}:3443 {
 	import public_cert
 	import app
-}
-
-https://{$HTTPS_HOST}:3444 {
-	import public_cert
-	import admin_panel
 }
 
 # localhost публичный сертификат получить не может — для проброса портов остаётся внутренний CA Caddy
 https://localhost:3443 {
 	tls internal
 	import app
-}
-
-https://localhost:3444 {
-	tls internal
-	import admin_panel
 }

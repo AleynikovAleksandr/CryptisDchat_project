@@ -85,6 +85,30 @@
     },
     isUnlocked() { return !!key; },
 
+    async createPinVerifier() {
+      if (!key || !salt) throw new Error('vault_locked');
+      const iv = C().random(12);
+      const proof = C().random(32);
+      const ciphertext = new Uint8Array(await root.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, proof));
+      return { v: 1, salt: C().b64(salt), iv: C().b64(iv), ciphertext: C().b64(ciphertext) };
+    },
+
+    async verifyPin(pin, verifier) {
+      if (!/^\d{4}$/.test(pin) || !verifier || verifier.v !== 1 ||
+          typeof verifier.salt !== 'string' || typeof verifier.iv !== 'string' ||
+          typeof verifier.ciphertext !== 'string' || verifier.salt.length !== 24 ||
+          verifier.iv.length !== 16 || verifier.ciphertext.length !== 64) return false;
+      try {
+        const verifierSalt = C().unb64(verifier.salt);
+        const verifierIv = C().unb64(verifier.iv);
+        const verifierCiphertext = C().unb64(verifier.ciphertext);
+        if (verifierSalt.length !== 16 || verifierIv.length !== 12 || verifierCiphertext.length !== 48) return false;
+        const candidateKey = await deriveKey(pin, verifierSalt);
+        await root.crypto.subtle.decrypt({ name: 'AES-GCM', iv: verifierIv }, candidateKey, verifierCiphertext);
+        return true;
+      } catch (e) { return false; }
+    },
+
     async create(pin, state) {
       salt = C().random(16);
       key = await deriveKey(pin, salt);

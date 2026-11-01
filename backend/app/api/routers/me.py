@@ -56,6 +56,12 @@ async def push_token(body: PushTokenIn, cu: CurrentUser = Depends(current_user),
     await session.commit()
 
 
+@router.delete("/me/push-token", status_code=204)
+async def delete_push_token(cu: CurrentUser = Depends(current_user), session: AsyncSession = Depends(get_session)):
+    await UserRepository(session).delete_push_token(cu.device_id)
+    await session.commit()
+
+
 @router.get("/push/vapid-public-key")
 async def vapid_key(cu: CurrentUser = Depends(current_user), infra: Infra = Depends(get_infra)) -> dict:
     """applicationServerKey для подписки браузера на Web Push; 404 — Web Push не настроен."""

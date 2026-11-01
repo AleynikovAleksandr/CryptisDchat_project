@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Attachment, Message, MessageSearchToken
+from app.models import Attachment, Message, MessageReaction, MessageSearchToken
 
 
 class MessageRepository:
@@ -70,6 +71,53 @@ class MessageRepository:
 
     async def delete_thread_messages(self, thread_id: str) -> None:
         await self.s.execute(delete(Message).where(Message.thread_id == thread_id))
+
+    async def reactions_for_messages(self, message_ids: list[str], user_id: str) -> dict[str, list[dict]]:
+        if not message_ids:
+            return {}
+        rows = await self.s.scalars(
+            select(MessageReaction).where(MessageReaction.message_id.in_(message_ids))
+            .order_by(MessageReaction.created_at, MessageReaction.user_id)
+        )
+        grouped: dict[tuple[str, str], dict] = {}
+        for row in rows:
+            key = (row.message_id, row.emoji_hash)
+            item = grouped.get(key)
+            if item is None:
+                item = {
+                    "emoji_hash": row.emoji_hash, "key_epoch": row.key_epoch,
+                    "ciphertext": row.ciphertext, "nonce": row.nonce,
+                    "count": 0, "mine": False,
+                }
+                grouped[key] = item
+            item["count"] += 1
+            item["mine"] = item["mine"] or row.user_id == user_id
+        result: dict[str, list[dict]] = {}
+        for (message_id, _), reaction in grouped.items():
+            result.setdefault(message_id, []).append(reaction)
+        return result
+
+    async def set_reaction(
+        self, message_id: str, user_id: str, emoji_hash: str, key_epoch: int,
+        ciphertext: bytes, nonce: bytes, active: bool,
+    ) -> None:
+        key = (message_id, user_id, emoji_hash)
+        existing = await self.s.get(MessageReaction, key)
+        if active:
+            if existing is not None:
+                return
+            try:
+                async with self.s.begin_nested():
+                    self.s.add(MessageReaction(
+                        message_id=message_id, user_id=user_id, emoji_hash=emoji_hash,
+                        key_epoch=key_epoch, ciphertext=ciphertext, nonce=nonce,
+                    ))
+                    await self.s.flush()
+            except IntegrityError:
+                pass  # concurrent duplicate add; the desired state already exists
+            return
+        if existing is not None:
+            await self.s.delete(existing)
 
     # --- вложения ---
     async def get_attachment(self, attachment_id: str) -> Attachment | None:

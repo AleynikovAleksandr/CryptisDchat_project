@@ -78,7 +78,7 @@ class SettingsService:
         await self.repo.unblock(user.id, other_id)
         await self.s.commit()
 
-    # --- жалобы (для модерации в Flask-админке) ---
+    # --- пользовательские жалобы ---
     async def report(self, user: User, body: ReportIn) -> str:
         if not (body.target_user_id or body.thread_id or body.message_id):
             raise Invalid("report must reference a user, a thread or a message")

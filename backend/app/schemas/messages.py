@@ -5,6 +5,23 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class MessageReactionOut(BaseModel):
+    emoji_hash: str
+    key_epoch: int
+    ciphertext: str
+    nonce: str
+    count: int
+    mine: bool
+
+
+class MessageReactionIn(BaseModel):
+    emoji_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    key_epoch: int = Field(ge=1)
+    ciphertext: str = Field(min_length=24, max_length=1024)
+    nonce: str = Field(min_length=32, max_length=32)
+    active: bool
+
+
 class MessageOut(BaseModel):
     """Сообщение в том виде, в каком его знает сервер: шифротекст + метаданные."""
 
@@ -25,6 +42,7 @@ class MessageOut(BaseModel):
     created_at: datetime
     expires_at: datetime | None
     confirmed: bool = False  # событие отправки подтверждено транзакцией в TON
+    reactions: list[MessageReactionOut] = Field(default_factory=list)
 
 
 class MessagesPageOut(BaseModel):
@@ -39,7 +57,7 @@ class SendMessageIn(BaseModel):
     key_epoch: int = Field(ge=1)
     sender_key_version: int = Field(ge=1)
     nonce: str = Field(max_length=64)
-    ciphertext: str = Field(max_length=200_000)
+    ciphertext: str = Field(max_length=5_000_000)
     signature: str = Field(max_length=200)
     kind: str = Field(default="text", pattern="^(text|file)$")
     reply_to_id: str | None = None

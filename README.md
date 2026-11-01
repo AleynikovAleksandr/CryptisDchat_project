@@ -2,7 +2,6 @@
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green)
-![Flask](https://img.shields.io/badge/Flask-3.1-black)
 ![MariaDB](https://img.shields.io/badge/MariaDB-11.4-003545)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.1-red)
 ![Celery](https://img.shields.io/badge/Celery-5.6-brightgreen)
@@ -11,7 +10,6 @@
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
 ![TON](https://img.shields.io/badge/TON-TonConnect-0098EA)
 ![E2EE](https://img.shields.io/badge/E2EE-XSalsa20--Poly1305%20%C2%B7%20ECDSA%20%C2%B7%20ECIES-6f42c1)
-![Tests](https://img.shields.io/badge/tests-90%20passed-success)
 
 An end-to-end encrypted messenger with a delivery log anchored on the TON blockchain — an
 implementation of the technical specification `CryptisDchat_TZ.md` and its appendices
@@ -51,7 +49,7 @@ CSS classes and re-rendering mechanics are preserved, and the demo data is repla
 - "Sent / delivered / read" events → hashes → Merkle tree → one service-wallet transaction per batch
 - Confirmation icon on messages and a "Message info" sheet that verifies the Merkle proof right in the browser
 - Group membership changes are separate transactions; keys rotate only after confirmation
-- Retries with exponential back-off and manual retry of failed batches from the admin panel
+- Retries with exponential back-off for failed batches
 
 **Messaging**
 - Direct chats and groups (creation with a photo, members, invitations, leaving, ownership hand-over)
@@ -69,12 +67,9 @@ CSS classes and re-rendering mechanics are preserved, and the demo data is repla
 - "Show when I'm online" and read receipts can be turned off
 - Media auto-deletion (30 / 60 days, 6 months) and "Delete all media"
 
-**Administration and infrastructure**
-- Flask admin panel: users (list of all users, search, pages), account suspension, session revocation,
-  permanent user deletion, reports, blockchain queue, Prometheus metrics
-- Admin sign-in with CSRF protection and brute-force lockout; audit log of every admin action
+**Infrastructure**
 - HMAC-signed webhooks; rate limiting for the API and WebSocket; Origin checks
-- 12 Docker containers (incl. a Caddy HTTPS front and a ProxySQL connection pool); Celery with 5 queues, 2 workers and beat;
+- 11 Docker containers (incl. a Caddy HTTPS front and a ProxySQL connection pool); Celery with 5 queues, 2 workers and beat;
   daily MariaDB dump
 
 ---
@@ -92,28 +87,26 @@ Before starting, the script validates `.env`
 `https://HTTPS_HOST:HTTPS_APP_PORT`) and that no other program holds the host ports, printing the exact fix.
 
 The script checks that `.env`, `worker.env` and `realm.env` exist in the project root, builds the images
-and starts all 12 containers (`db`, `redis`, `proxysql`, `backend`, `admin`, `caddy`, `worker`, `worker_fast`, `beat`,
+and starts all 11 containers (`db`, `redis`, `proxysql`, `backend`, `caddy`, `worker`, `worker_fast`, `beat`,
 `realm1..3`) in two stages — first `db`, `redis`, `proxysql`, `realm1..3`, waiting until MariaDB and ProxySQL are ready, then the
 application. Finally it checks that **every** container is running (and prints its logs if one failed),
-creates the admin-panel user and prints the URLs and password. FastAPI (`backend`) and Flask (`admin`)
-run under Gunicorn inside the containers. Other commands: `check` (validate `.env` and host ports without
+and prints the application URL. FastAPI (`backend`) runs under Gunicorn inside the container. Other commands: `check` (validate `.env` and host ports without
 starting anything), `status`, `logs [service]`, `down`.
 Application containers run as the user who started the script (`id -u`/`id -g`), not as root.
 
 | URL | What it is |
 |---|---|
 | [https://85.95.150.8:3443/](https://85.95.150.8:3443/) | the app: sign-in (`Login.html`) → messenger (`cryptis.html`), API, WebSocket |
-| [https://85.95.150.8:3444/admin/](https://85.95.150.8:3444/admin/) | Flask admin panel (login in `.env` `ADMIN_USERNAME`; the password is stored only as a hash in `ADMIN_PASSWORD_HASH`, made with `flask --app admin_app.wsgi hash-password`) |
-| `http://localhost:3890` / `http://localhost:3891/admin/` | the same over an SSH / VS Code port forward |
+| `http://localhost:3890` | the app over an SSH / VS Code port forward |
 
 **HTTPS with a public Let's Encrypt certificate for the IP address.** Browsers enable Web Crypto
 (`crypto.subtle`) only over HTTPS or on `localhost`, so over plain `http://<IP>:3890` sign-in cannot work.
 The `caddy` container ([`caddy/Caddyfile`](caddy/Caddyfile), Caddy 2.11.4) serves HTTPS on `HTTPS_APP_PORT`
-(3443 → `backend`) and `HTTPS_ADMIN_PORT` (3444 → `admin`) with a certificate that Let's Encrypt issues
+(3443 → `backend`) with a certificate that Let's Encrypt issues
 directly for the IP in `HTTPS_HOST` — browsers trust it, no warning. Let's Encrypt issues IP certificates only
 with the `shortlived` profile (valid ~6 days); Caddy renews them automatically through the ACME HTTP-01
 challenge, so **port 80 must stay reachable from the internet** and must not be taken by another program
-(`scripts/run_gunicorn.sh check` verifies that). `https://localhost:3443/3444` (SSH / VS Code port forward)
+(`scripts/run_gunicorn.sh check` verifies that). `https://localhost:3443` (SSH / VS Code port forward)
 keeps a certificate from Caddy's local CA.
 
 The current `.env` is set up for a local run (sign-in with the dev wallet). For a production server change
@@ -147,10 +140,9 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
 
 Starts everything in one terminal: a real Redis (the `redislite` pip package), SQLite instead of MariaDB,
-three realm services, Celery worker + beat, the Flask admin panel and FastAPI. The blockchain is mocked
+three realm services, Celery worker + beat and FastAPI. The blockchain is mocked
 (confirmation after ~3 s), sign-in uses the dev wallet (an Ed25519 key in the browser; the server fully
 verifies the `ton_proof` signature). [http://localhost:3890/login?dev=new](http://localhost:3890/login?dev=new) creates another test user.
-Admin panel: [http://127.0.0.1:3891/admin/](http://127.0.0.1:3891/admin/), `admin` / `devpassword123`.
 
 ### Client build (minified JavaScript)
 
@@ -170,7 +162,7 @@ end-to-end encryption and server-side checks, not on hiding the client.
 ### Tests
 
 ```bash
-.venv/bin/python -m pytest                      # 90 tests: API, worker, admin, WS, crypto compatibility
+.venv/bin/python -m pytest                      # API, worker, WS, crypto compatibility
 .venv/bin/python -m playwright install chromium # once
 .venv/bin/python scripts/dev_server.py &        # stack for the browser scenario
 .venv/bin/python tests/e2e/e2e_browser.py       # end-to-end scenario in Chromium (4 browser profiles)
@@ -190,7 +182,6 @@ flowchart LR
   end
   subgraph public[cryptis_network]
     API[backend :3890<br/>FastAPI · Gunicorn/Uvicorn]
-    ADM[admin :3891<br/>Flask · Gunicorn/gthread]
     R[(Redis<br/>0 cache · 1 broker · 2 results · 3 pub/sub)]
     PX[proxysql :6033<br/>connection pool]
     DB[(MariaDB)]
@@ -204,7 +195,6 @@ flowchart LR
   TON[(TON)]
   UI <-- REST + WS (protobuf) --> API
   API --> PX & R
-  ADM --> PX & R
   PX --> DB
   R --> W & WF
   BEAT --> R
@@ -216,7 +206,7 @@ flowchart LR
 * **backend** — the only public entry point: API, WebSocket, pages. It has no access to the wallet
   mnemonic or to the realm services (spec section 7, least privilege).
 * **worker** (queues `blockchain`, `keys`) — the only service holding the service-wallet mnemonic and
-  network access to the realms; `acks_late`, retries from 30 s to 10 min, then manual handling in the admin panel.
+  network access to the realms; `acks_late`, retries from 30 s to 10 min.
 * **worker_fast** (`notifications`, `media`, `maintenance`) — a separate service so that a stuck
   transaction cannot block push notifications (Gunicorn_Celery.md 4.9).
 * **Redis Pub/Sub** — a "doorbell" between Gunicorn workers; the database is the source of truth.
@@ -242,19 +232,18 @@ CryptisDchat_project/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py, config.py
-│   │   ├── models/          ORM (26 tables) — shared by FastAPI, Flask and Celery
+│   │   ├── models/          ORM — shared by FastAPI and Celery
 │   │   ├── schemas/         Pydantic DTOs
 │   │   ├── interfaces/      abstractions: blockchain, event bus, task queue, storage, realm, push, ton_proof
 │   │   ├── repositories/    SQL queries
 │   │   ├── services/        business logic: auth, threads, messages, groups, keys, merkle, treekem …
 │   │   ├── api/             dependencies.py, routers/ (60 REST operations + /ws)
 │   │   └── proto/           protobuf codec (schema — proto/cryptis.proto)
-│   ├── admin_app/           Flask admin panel, webhooks, Flask-WTF forms
-│   ├── database/            schema.sql (MariaDB), initial_data.py
+│   ├── database/            schema.sql (MariaDB)
 │   ├── templates/           login.html, cryptis.html (from the mockups)
 │   ├── static/              css/, images/, js/{lib,app,vendor}
 │   ├── utils/               logging with token redaction
-│   ├── gunicorn.conf.py, gunicorn_admin.conf.py, Dockerfile
+│   ├── gunicorn.conf.py, Dockerfile
 ├── worker/                  celery_app.py, tasks/, gateways/ (TON, realm, push), Dockerfile
 ├── realm/                   secret-share storage service (×3 containers), Dockerfile
 ├── proto/cryptis.proto      binary transport format (spec 6.2, 6.4)
@@ -316,7 +305,7 @@ rotate only after they are confirmed.
 | Messages | `messages` (ciphertext, signature, epoch), `message_search_tokens`, `attachments` |
 | Blockchain | `chain_events` (hash, Merkle proof), `chain_batches` (root, transaction) |
 | Settings | `user_settings`, `group_invite_allowlist`, `blocklist` |
-| Administration | `admin_users`, `admin_audit_log`, `reports` |
+| Reports | `reports` |
 
 ## API Endpoints
 
@@ -439,34 +428,17 @@ Binary `WsFrame` frames (`proto/cryptis.proto`); the first frame is `auth` with 
 | GET | `/tonconnect-manifest.json` | TonConnect manifest |
 | GET | `/healthz` | Liveness check |
 
-### Flask — admin panel and webhooks (`:3891`)
+### Signed webhooks
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET, POST | `/admin/login` | Admin sign-in (CSRF, brute-force lockout) |
-| POST | `/admin/logout` | Log out |
-| GET | `/admin/` | Summary metrics and audit log |
-| GET | `/admin/users` | Search by UUID, TON address, username |
-| GET | `/admin/users/<uuid>` | User card: wallets, devices, refresh tokens |
-| POST | `/admin/users/<uuid>/suspend` | Suspend the account |
-| POST | `/admin/users/<uuid>/unsuspend` | Restore the account |
-| POST | `/admin/users/<uuid>/revoke-sessions` | Revoke all sessions |
-| GET | `/admin/reports` | Reports |
-| GET, POST | `/admin/reports/<id>` | Handle a report |
-| GET | `/admin/blockchain-queue` | TON write queue |
-| POST | `/admin/blockchain-queue/retry/<batch_id>` | Retry a failed batch |
-| POST | `/admin/blockchain-queue/retry-membership/<event_id>` | Retry a group-membership transaction |
-| GET | `/admin/metrics` | Metrics in Prometheus format |
 | POST | `/webhooks/ton-tx-status` | TON transaction status (HMAC signature) |
 | POST | `/webhooks/tonconnect` | TonConnect bridge callbacks (HMAC signature) |
-| GET | `/healthz` | Liveness check |
 
 ---
 
 ## Design Decisions and Deviations from the Documents
 
-* **The Flask admin panel** is a separate `admin` service (Gunicorn_Celery.md 2.2); it was not listed in
-  "Ports_and_Database"; port `3891`.
 * **Two workers**, `worker` / `worker_fast`, instead of one — as recommended in Gunicorn_Celery.md 4.9.
 * **Three realms** in their own `internal` network; the realm key is a 0600 file (a software HSM equivalent).
 * The `db` (host port 3307 → container 3306, override with `DB_EXTERNAL_PORT` in `.env`) and `redis` (6390, 8096) ports are published to the host as in "Ports_and_Database"; on a
@@ -507,6 +479,5 @@ Binary `WsFrame` frames (`proto/cryptis.proto`); the first frame is `auth` with 
 Developed by **Aleynikov Aleksandr** — infrastructure, Python back end, the cryptographic protocol and security\
 Contact: [aleynikov.aleksandr@icloud.com](mailto:aleynikov.aleksandr@icloud.com)
 
-Co-author: **Skripka Artyom Aleksandrovich** — admin panel development, risk analysis, UI and database
-design, client-side development and testing\
+Co-author: **Skripka Artyom Aleksandrovich** — risk analysis, UI and database design, client-side development and testing\
 Profile: [newlxp.ru/user/21d7e9e8-f5c5-4df9-a520-52e833d16fac](https://newlxp.ru/user/21d7e9e8-f5c5-4df9-a520-52e833d16fac)

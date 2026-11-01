@@ -52,6 +52,14 @@ CREATE TABLE devices (
     CONSTRAINT fk_devices_user_id FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE device_pairing_quotas (
+    identity_hash CHAR(64) CHARACTER SET ascii NOT NULL,
+    attempts      JSON NOT NULL,
+    updated_at    DATETIME(6) NOT NULL,
+    PRIMARY KEY (identity_hash),
+    KEY ix_device_pairing_quotas_updated_at (updated_at)
+) ENGINE=InnoDB;
+
 CREATE TABLE refresh_tokens (
     id              CHAR(36)    CHARACTER SET ascii NOT NULL,
     user_id         CHAR(36)    CHARACTER SET ascii NOT NULL,
@@ -278,6 +286,20 @@ CREATE TABLE message_search_tokens (
     CONSTRAINT fk_message_search_tokens_message_id FOREIGN KEY (message_id) REFERENCES messages (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE message_reactions (
+    message_id  CHAR(36) CHARACTER SET ascii NOT NULL,
+    user_id     CHAR(36) CHARACTER SET ascii NOT NULL,
+    emoji_hash  CHAR(64) CHARACTER SET ascii NOT NULL,
+    key_epoch   INT NOT NULL,
+    ciphertext  VARBINARY(512) NOT NULL,
+    nonce       VARBINARY(24) NOT NULL,
+    created_at  DATETIME(6) NOT NULL,
+    PRIMARY KEY (message_id, user_id, emoji_hash),
+    KEY ix_message_reactions_message_id (message_id),
+    CONSTRAINT fk_message_reactions_message_id FOREIGN KEY (message_id) REFERENCES messages (id) ON DELETE CASCADE,
+    CONSTRAINT fk_message_reactions_user_id FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 CREATE TABLE attachments (
     id            CHAR(36)     CHARACTER SET ascii NOT NULL,
     owner_id      CHAR(36)     CHARACTER SET ascii NOT NULL,
@@ -363,33 +385,6 @@ CREATE TABLE blocklist (
     CONSTRAINT fk_blocklist_blocked_user_id FOREIGN KEY (blocked_user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE admin_users (
-    id              INT          NOT NULL AUTO_INCREMENT,
-    username        VARCHAR(64)  NOT NULL,
-    password_hash   VARCHAR(255) NOT NULL,
-    is_active       BOOLEAN      NOT NULL DEFAULT TRUE,
-    failed_logins   INT          NOT NULL DEFAULT 0,
-    locked_until    DATETIME(6)  NULL,
-    last_login_at   DATETIME(6)  NULL,
-    created_at      DATETIME(6)  NOT NULL,
-    PRIMARY KEY (id),
-    UNIQUE KEY uq_admin_users_username (username)
-) ENGINE=InnoDB;
-
-CREATE TABLE admin_audit_log (
-    id           BIGINT      NOT NULL AUTO_INCREMENT,
-    admin_id     INT         NULL,
-    action       VARCHAR(64) NOT NULL,
-    target_type  VARCHAR(32) NOT NULL DEFAULT '',
-    target_id    VARCHAR(64) NOT NULL DEFAULT '',
-    details      TEXT        NOT NULL,
-    ip_address   VARCHAR(45) CHARACTER SET ascii NOT NULL DEFAULT '',
-    created_at   DATETIME(6) NOT NULL,
-    PRIMARY KEY (id),
-    KEY ix_admin_audit_log_created_at (created_at),
-    CONSTRAINT fk_admin_audit_log_admin_id FOREIGN KEY (admin_id) REFERENCES admin_users (id)
-) ENGINE=InnoDB;
-
 CREATE TABLE reports (
     id               CHAR(36)    CHARACTER SET ascii NOT NULL,
     reporter_id      CHAR(36)    CHARACTER SET ascii NOT NULL,
@@ -400,11 +395,9 @@ CREATE TABLE reports (
     details          TEXT        NOT NULL,
     status           ENUM('open','in_review','resolved','rejected') NOT NULL DEFAULT 'open',
     resolution_note  TEXT        NOT NULL,
-    handled_by       INT         NULL,
     created_at       DATETIME(6) NOT NULL,
     updated_at       DATETIME(6) NOT NULL,
     PRIMARY KEY (id),
     KEY ix_reports_status (status),
-    CONSTRAINT fk_reports_reporter_id FOREIGN KEY (reporter_id) REFERENCES users (id) ON DELETE CASCADE,
-    CONSTRAINT fk_reports_handled_by FOREIGN KEY (handled_by) REFERENCES admin_users (id)
+    CONSTRAINT fk_reports_reporter_id FOREIGN KEY (reporter_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

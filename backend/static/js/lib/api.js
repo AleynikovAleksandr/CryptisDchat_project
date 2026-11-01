@@ -71,6 +71,7 @@
     ApiError, session, request, refresh: doRefresh,
     get: (p, o) => request('GET', p, undefined, o),
     post: (p, b, o) => request('POST', p, b, o),
+    put: (p, b, o) => request('PUT', p, b, o),
     patch: (p, b) => request('PATCH', p, b),
     del: (p) => request('DELETE', p),
     bytes: (p) => request('GET', p, undefined, { raw: true }),

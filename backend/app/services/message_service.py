@@ -1,7 +1,7 @@
-"""Сообщения: приём E2E-пакета, история, поиск по слепому индексу, пересылка, вложения.
+"""Сообщения: приём E2E-пакета, история, реакции, поиск, пересылка и вложения.
 
-Сервер работает только с шифротекстом (ТЗ 7): в этом модуле нет ни одного пути,
-который мог бы получить открытый текст — ключей для этого у сервера просто нет.
+Текст, вложения и эмодзи-реакции шифруются на клиенте; сервер хранит реакцию
+как шифротекст и непрозрачный хеш для подсчёта и синхронизации одинаковых эмодзи.
 """
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import base64
 import binascii
 import hashlib
 import re
+from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +22,10 @@ from app.repositories import (
     ThreadRepository,
     UserRepository,
 )
-from app.schemas.messages import MessageOut, MessageProofOut, MessagesPageOut, SendMessageIn, UploadOut
+from app.schemas.messages import (
+    MessageOut, MessageProofOut, MessageReactionIn, MessageReactionOut,
+    MessagesPageOut, SendMessageIn, UploadOut,
+)
 from app.services import cache, signatures
 from app.services.chain_service import ChainService
 from app.services.errors import Conflict, Forbidden, Invalid, NotFound
@@ -38,6 +42,15 @@ def _b64(value: str, field: str) -> bytes:
         return base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise Invalid(f"{field}: invalid base64") from exc
+
+
+def _reaction_out(item: dict) -> MessageReactionOut:
+    return MessageReactionOut(
+        emoji_hash=item["emoji_hash"], key_epoch=item["key_epoch"],
+        ciphertext=base64.b64encode(item["ciphertext"]).decode("ascii"),
+        nonce=base64.b64encode(item["nonce"]).decode("ascii"),
+        count=item["count"], mine=item["mine"],
+    )
 
 
 class MessageService:
@@ -100,6 +113,7 @@ class MessageService:
         tokens = [t for t in packet.search_tokens if TOKEN_RE.match(t)]
         seq = await self.threads.next_seq(thread)
         now = utcnow()
+        expires_at = now + timedelta(seconds=thread.disappearing_seconds) if thread.disappearing_seconds else None
         msg = Message(
             id=new_uuid(), thread_id=thread_id, seq=seq, sender_id=user.id,
             client_msg_id=packet.client_msg_id, kind=packet.kind,
@@ -107,7 +121,7 @@ class MessageService:
             key_epoch=packet.key_epoch, sender_key_version=packet.sender_key_version,
             content_hash=hashlib.sha256(ciphertext).hexdigest(),
             reply_to_id=packet.reply_to_id, forwarded_from_id=packet.forwarded_from_id,
-            attachment_id=packet.attachment_id, created_at=now,
+            attachment_id=packet.attachment_id, created_at=now, expires_at=expires_at,
         )
         self.s.add(msg)
         await self.s.flush()
@@ -182,14 +196,45 @@ class MessageService:
         items = [m for m in items if m.expires_at is None or m.expires_at > now]
         next_before = items[0].seq if len(items) == limit and items and items[0].seq > 1 else None
         confirmed = await ChainRepository(self.s).confirmed_message_ids([m.id for m in items])
-        return MessagesPageOut(items=[message_out(m, m.id in confirmed) for m in items], next_before=next_before)
+        reactions = await self.messages.reactions_for_messages([m.id for m in items], user.id)
+        return MessagesPageOut(items=[message_out(
+            m, m.id in confirmed, [_reaction_out(item) for item in reactions.get(m.id, [])],
+        ) for m in items], next_before=next_before)
 
     async def search(self, user: User, thread_id: str, token_groups: list[list[str]]) -> list[MessageOut]:
         _, member = await self.thread_svc.require_member(thread_id, user.id)
         groups = [[t for t in g if TOKEN_RE.match(t)][:32] for g in token_groups[:8]]
         groups = [g for g in groups if g]
         found = await self.messages.search(thread_id, groups, after_seq=member.cleared_seq)
-        return [message_out(m) for m in found]
+        reactions = await self.messages.reactions_for_messages([m.id for m in found], user.id)
+        return [message_out(m, reactions=[_reaction_out(item) for item in reactions.get(m.id, [])]) for m in found]
+
+    async def set_reaction(
+        self, user: User, message_id: str, packet: MessageReactionIn,
+    ) -> list[MessageReactionOut]:
+        message = await self._require_readable(user, message_id)
+        if message.expires_at is not None and message.expires_at <= utcnow():
+            raise NotFound("message not found")
+        if packet.key_epoch != message.key_epoch:
+            raise Invalid("reaction key epoch does not match message")
+        nonce = _b64(packet.nonce, "nonce")
+        ciphertext = _b64(packet.ciphertext, "ciphertext")
+        if len(nonce) != 24 or len(ciphertext) < 16 or len(ciphertext) > 512:
+            raise Invalid("invalid encrypted reaction")
+        await self.messages.set_reaction(
+            message.id, user.id, packet.emoji_hash, packet.key_epoch,
+            ciphertext, nonce, packet.active,
+        )
+        await self.s.commit()
+        grouped = await self.messages.reactions_for_messages([message.id], user.id)
+        reactions = [_reaction_out(item) for item in grouped.get(message.id, [])]
+        payload = {
+            "thread_id": message.thread_id, "message_id": message.id,
+            "reactions": [item.model_dump(mode="json") for item in reactions],
+        }
+        for user_id in await self.threads.active_member_ids(message.thread_id):
+            await self.infra.bus.publish(user_id, "message.reactions", payload)
+        return reactions
 
     async def forward(self, user: User, message_id: str, target_thread_id: str, packet: SendMessageIn) -> MessageOut:
         await self._require_readable(user, message_id)

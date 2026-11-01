@@ -21,7 +21,7 @@ H.focusGate = () => {
   el.focus();
 };
 H.gateReset = () => setState({ gate: { mode: 'setup', pin: '', reset: true } });
-H.gateOtherAccount = () => logout(false);
+H.gateOtherAccount = () => logout();
 
 const validSetupUsername = (value) => /^[a-zA-Z0-9_.]{3,15}$/.test((value || '').replace(/^@/, ''));
 H.onSetupProfile = (e) => {
@@ -70,7 +70,9 @@ async function submitGate(pin) {
   if (!g || g.lockedUntil > Date.now()) return;
   const fail = (error, mode) => setState({ gate: { mode: mode || g.mode, pin: '', error } });
   try {
-    if (g.mode === 'unlock') {
+    if (g.mode === 'pairing-pin') {
+      await finishPairing(pin);
+    } else if (g.mode === 'unlock') {
       setState({ gate: Object.assign({}, g, { busy: true }) });
       try { await unlockWith(pin); } catch (err) {
         const lockedUntil = VAULT.lockedUntil();
@@ -94,6 +96,7 @@ async function submitGate(pin) {
 /* --- боковая панель --- */
 H.toggleSidebar = () => set({ sidebarOpen: !state.sidebarOpen });
 H.toggleFilter = () => set({ filterOpen: !state.filterOpen });
+H.expandSidebarAndOpenFilters = () => set({ sidebarOpen: true, filterOpen: true });
 H.pickFilter = (e) => set({ filter: e.currentTarget.getAttribute('data-val'), filterOpen: false });
 H.openSettings = () => { set({ view: 'settings', filterOpen: false }); loadSettings().catch(() => {}); };
 H.closeSettings = () => set({ view: 'chat' });
@@ -149,6 +152,24 @@ H.pickRetention = (e) => {
 };
 H.toggleMarkdown = () => { set({ markdownPreview: !state.markdownPreview }); patchSettings({ markdown_preview: state.markdownPreview }); };
 H.toggleOnline = () => { set({ showOnline: !state.showOnline }); patchSettings({ show_online: state.showOnline }); };
+H.toggleNotifications = async () => {
+  if (!state.notificationsEnabled) {
+    const permission = await requestNotifications();
+    if (permission !== 'granted') {
+      showToast(permission === 'denied' ? 'Allow notifications in your browser settings first.' : 'Notifications are not available.');
+      return;
+    }
+    localStorage.setItem('cx-notifications-enabled', 'true');
+    set({ notificationsEnabled: true });
+    await enablePush();
+    showToast('All notifications are on');
+    return;
+  }
+  localStorage.setItem('cx-notifications-enabled', 'false');
+  set({ notificationsEnabled: false, notice: null });
+  await disablePush();
+  showToast('All notifications are off');
+};
 H.toggleReceipts = () => { set({ readReceipts: !state.readReceipts }); patchSettings({ send_read_receipts: state.readReceipts }); };
 H.openDeleteMedia = () => set({ deleteMediaOpen: true });
 H.closeDeleteMedia = () => set({ deleteMediaOpen: false });
@@ -188,8 +209,14 @@ H.endSession = async (e) => {
   const id = e.currentTarget.getAttribute('data-id');
   try { await API.del('/api/auth/sessions/' + id); await loadSessions(); showToast('Session ended'); } catch (err) { showToast(errorText(err)); }
 };
-H.logoutAll = () => logout(true);
-H.logout = () => logout(false);
+H.logoutAll = async () => {
+  try {
+    await API.post('/api/auth/logout-all');
+    await loadSessions();
+    showToast('Other devices logged out');
+  } catch (err) { showToast(errorText(err)); }
+};
+H.logout = () => logout();
 H.lockNow = () => lockApp();
 
 /* --- смена код-пароля: текущий → новый → подтверждение (ТЗ 6.5, 6.6) --- */
@@ -279,28 +306,41 @@ const findMsg = (id) => activeMessages().find((m) => m.id === id);
 
 H.hoverMsg = (e) => set({ hoverId: e.currentTarget.getAttribute('data-msg-id') });
 H.unhoverMsg = () => set({ hoverId: null });
-/* Меню сообщения под элементом anchor (кнопка «⋯» или сам пузырь), не выходя за края <main>. */
-function openMsgMenuAt(id, anchor) {
+/* Меню сообщения позиционируется относительно чата: его scrim — абсолютный ребёнок .chat. */
+function openMsgMenuAt(id, anchor, alignToAction = false, openOnRight = false) {
   const msg = findMsg(id);
   if (!msg) return;
   const rect = anchor.getBoundingClientRect();
-  const parentRect = anchor.closest('main').getBoundingClientRect();
+  const parentRect = anchor.closest('.chat').getBoundingClientRect();
   const menuH = msg.file ? 212 : 256;
+  const menuW = window.matchMedia('(max-width: 700px)').matches ? 238 : 246;
+  const gap = 0;
   const below = rect.bottom - parentRect.top;
   const flipUp = below + menuH > parentRect.height - 16;
+  const leftOf = rect.left - parentRect.left - menuW - gap;
+  const rightOf = rect.right - parentRect.left + gap;
+  const left = Math.max(8, Math.min(openOnRight ? rightOf : leftOf, parentRect.width - menuW - 8));
+  const top = alignToAction
+    ? Math.max(8, Math.min(rect.top - parentRect.top, parentRect.height - menuH - 8))
+    : flipUp ? Math.max(rect.top - parentRect.top - menuH, 8) : below;
   setState({
     menuId: id, hoverId: id,
-    menuPos: {
-      top: flipUp ? Math.max(rect.bottom - parentRect.top - menuH, 8) : below,
-      left: Math.max(8, Math.min(rect.left - parentRect.left, parentRect.width - 254)),
-    },
+    menuPos: { top, left },
   });
 }
-H.openMsgMenu = (e) => openMsgMenuAt(e.currentTarget.getAttribute('data-id'), e.currentTarget);
+H.openMsgMenu = (e) => {
+  const row = e.currentTarget.closest('.msg-row');
+  if (!row) return;
+  const longMessage = row.querySelector('.bubble.has-long-text');
+  const id = e.currentTarget.getAttribute('data-id');
+  const msg = findMsg(id);
+  const isReceived = !!(msg && !msg.mine);
+  const anchorToAction = !!longMessage || isReceived;
+  const anchor = anchorToAction ? e.currentTarget : (row.querySelector('.bubble, .file-card') || row);
+  openMsgMenuAt(id, anchor, anchorToAction, isReceived);
+};
 
-/* Сенсорный экран: кнопок при наведении нет — меню открывается долгим нажатием на сообщение.
- * iOS Safari не присылает contextmenu на долгое нажатие, поэтому считаем время касания сами;
- * contextmenu (Android, правая кнопка мыши) открывает то же меню. */
+/* Сенсорный экран: кнопок при наведении нет — меню открывается долгим нажатием на сообщение. */
 const LONG_PRESS_MS = 450;
 let pressTimer = null, pressStart = null, pressFired = false, suppressClickUntil = 0;
 
@@ -339,10 +379,7 @@ function bindLongPress(root) {
   });
   root.addEventListener('touchcancel', cancelPress);
   root.addEventListener('contextmenu', (e) => {
-    const a = msgAnchor(e.target);
-    if (!a) return;
-    e.preventDefault();
-    if (!pressFired && !state.menuId) openMsgMenuAt(a.id, a.el);
+    if (msgAnchor(e.target)) e.preventDefault();
   });
   // клик-эхо от отпускания пальца не должен закрыть только что открытое меню или скачать файл;
   // нажатия на пункты самого меню проходят всегда
@@ -355,7 +392,95 @@ function bindLongPress(root) {
   }, true);
 }
 H.closeMsgMenu = () => set({ menuId: null });
-H.react = () => showToast('Reactions are coming soon');
+H.closeEmojiPicker = () => set({ emojiPicker: null, emojiQuery: '' });
+H.onEmojiQuery = (e) => set({ emojiQuery: e.target.value });
+H.clearEmojiQuery = () => set({ emojiQuery: '' });
+H.pickEmojiCategory = (e) => set({ emojiCategory: e.currentTarget.getAttribute('data-category') });
+function showEmojiPicker(mode, msgId, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const draft = mode === 'composer' ? draftEl() : null;
+  const width = Math.min(320, window.innerWidth - 24);
+  const height = Math.min(410, window.innerHeight - 24);
+  const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+  const top = rect.top + height + 12 <= window.innerHeight
+    ? rect.bottom + 8
+    : Math.max(12, rect.top - height - 8);
+  set({ emojiPicker: { mode, msgId: msgId || null }, emojiQuery: '', emojiCategory: 'Smileys & people',
+    emojiPos: { top: Math.max(12, Math.min(top, window.innerHeight - height - 12)), left },
+    emojiSelection: draft ? { start: draft.selectionStart, end: draft.selectionEnd } : null });
+  setTimeout(() => { const input = document.getElementById('emoji-search'); if (input) input.focus(); }, 0);
+}
+H.openEmojiPicker = (e) => {
+  e.stopPropagation();
+  if (state.emojiPicker && state.emojiPicker.mode === 'composer') {
+    H.closeEmojiPicker();
+    return;
+  }
+  showEmojiPicker('composer', null, e.currentTarget);
+};
+H.openReactionPicker = (e) => {
+  e.stopPropagation();
+  const messageId = e.currentTarget.getAttribute('data-id');
+  const message = findMsg(messageId);
+  if (!message || message.pending || message.failed) return;
+  showEmojiPicker('reaction', messageId, e.currentTarget);
+};
+H.pickEmoji = (e) => {
+  const emoji = e.currentTarget.getAttribute('data-emoji');
+  if (!emoji) return;
+  const picker = state.emojiPicker;
+  if (picker && picker.mode === 'reaction') {
+    const msg = findMsg(picker.msgId);
+    if (msg) {
+      const threadId = state.activeThread;
+      const previous = (msg.reactions || []).map((reaction) => Object.assign({}, reaction));
+      const reactions = previous.map((reaction) => Object.assign({}, reaction));
+      const existing = reactions.find((reaction) => reaction.emoji === emoji);
+      const active = !(existing && existing.mine);
+      if (active && existing) {
+        existing.count = (existing.count || 1) + 1;
+        existing.mine = true;
+      } else if (active) {
+        reactions.push({ emoji, count: 1, mine: true });
+      } else if (existing.count > 1) {
+        existing.count -= 1;
+        existing.mine = false;
+      } else {
+        const index = reactions.indexOf(existing);
+        reactions.splice(index, 1);
+      }
+      msg.reactions = reactions;
+      set({ emojiPicker: null, emojiQuery: '' });
+      cacheMessages(threadId);
+      saveMessageReaction(threadId, msg, emoji, active).then((saved) => {
+        msg.reactions = saved;
+        cacheMessages(threadId);
+        if (state.activeThread === threadId) render();
+      }).catch((err) => {
+        msg.reactions = previous;
+        cacheMessages(threadId);
+        if (state.activeThread === threadId) render();
+        showToast(errorText(err));
+      });
+      return;
+    }
+    set({ emojiPicker: null, emojiQuery: '' });
+    return;
+  }
+  const input = draftEl();
+  const selection = state.emojiSelection;
+  const start = input ? (selection ? selection.start : input.selectionStart) : state.draft.length;
+  const end = input ? (selection ? selection.end : input.selectionEnd) : start;
+  const draft = state.draft.slice(0, start) + emoji + state.draft.slice(end);
+  if (input) input.value = draft;
+  set({ draft, emojiSelection: { start: start + emoji.length, end: start + emoji.length } });
+  const next = draftEl();
+  if (next) {
+    next.focus();
+    next.setSelectionRange(start + emoji.length, start + emoji.length);
+    autosizeDraft();
+  }
+};
 H.noop = () => {};
 H.stop = (e) => e.stopPropagation();
 
@@ -378,6 +503,18 @@ H.openNotice = () => {
   openThread(n.threadId);
 };
 H.closeNotice = (e) => { e.stopPropagation(); hideNotice(); };
+H.toggleLongMessage = (e) => {
+  e.stopPropagation();
+  const button = e.currentTarget;
+  const bubble = button.closest('.bubble');
+  const text = bubble && bubble.querySelector('.bubble__text');
+  if (!text) return;
+  const expanded = text.classList.toggle('is-expanded');
+  text.classList.toggle('is-collapsed', !expanded);
+  button.setAttribute('aria-expanded', String(expanded));
+  button.querySelector('span').textContent = expanded ? 'Show less' : 'See more';
+  button.querySelector('svg').classList.toggle('rotate-180', expanded);
+};
 H.toggleNotice = (e) => {
   e.stopPropagation();
   clearTimeout(noticeTimer);  // раскрытое сообщение читают — не прячем его по таймеру
@@ -461,14 +598,13 @@ H.send = () => {
   set({ draft: '', attachments: [], replyDraft: null });
   hardResetDraft();
   notifyTyping(tid, false);
-  (async () => {
-    for (const f of files) await sendFile(tid, f, !text ? reply : null);
-    if (text) await sendText(tid, text, reply);
-  })();
+  const jobs = files.map((attachment) => ({ type: 'file', attachment, reply: !text ? reply : null }));
+  if (text) jobs.push({ type: 'text', text, reply });
+  enqueueMessageBatch(tid, jobs);
 };
 H.pickFiles = () => { const el = document.getElementById('dc-file-input'); if (el) el.click(); };
-H.onFiles = (e) => {
-  const files = Array.from(e.target.files || []);
+H.addFiles = (fileList) => {
+  const files = Array.from(fileList || []);
   if (!files.length) return;
   setState((st) => ({
     attachments: (st.attachments || []).concat(files.map((file, i) => {
@@ -477,6 +613,9 @@ H.onFiles = (e) => {
                mime: file.type || 'application/octet-stream', fileObj: file };
     })),
   }));
+};
+H.onFiles = (e) => {
+  H.addFiles(e.target.files);
   e.target.value = '';
 };
 H.removeAttachment = (e) => {
@@ -584,7 +723,6 @@ H.goEdit = () => {
 H.goDisappearing = () => set({ profileScreen: 'disappearing', navDir: 'forward' });
 H.toggleMore = () => set({ moreOpen: !state.moreOpen });
 H.searchFromProfile = () => dismissProfile(() => H.openSearch());
-H.settingsFromProfile = () => dismissProfile(() => H.openSettings());
 H.pickVanish = async (e) => {
   const label = e.currentTarget.getAttribute('data-val');
   const t = peerOf();
@@ -592,7 +730,7 @@ H.pickVanish = async (e) => {
   try {
     await API.patch('/api/threads/' + t.id + '/disappearing', { seconds });
     t.disappearing = seconds;
-    render();
+    set({ navDir: 'none' });
   } catch (err) { showToast(errorText(err)); }
 };
 H.clearThread = async () => {
@@ -678,4 +816,46 @@ H.copyTon = async (e) => {
   if (!addr) return;
   await copyText(addr);
   showToast('Address copied');
+};
+
+/* Pairing actions retain secrets in the data layer, never in rendered state. */
+H.beginPairing = () => beginPairing();
+H.retryPairingComplete = () => finishPairing();
+H.cancelPairing = async () => {
+  pairingCancelEpoch++;
+  const creation = pairingCreationSettled;
+  await clearPairing();
+  await creation;
+  location.replace('/login');
+};
+H.copyPairingCode = async () => {
+  if (!state.gate || !state.gate.code) return;
+  await copyText(state.gate.code);
+  showToast('Code copied');
+};
+H.goConnectDevice = () => {
+  stopPairingCamera(); pairingApproval = null;
+  set({ view: 'pairing-approve', pairingApproval: { status: 'scan' } });
+};
+H.closeConnectDevice = () => { stopPairingCamera(); pairingApproval = null; set({ view: 'settings', pairingApproval: null }); };
+H.inspectPairing = async () => {
+  const code = document.getElementById('pairing-scan-code').value;
+  try { await inspectPairing(code); } catch (e) { showToast('Could not inspect this code. Check the code and its expiry.'); }
+};
+H.startPairingCamera = async () => {
+  try { await startPairingCamera(); } catch (e) {
+    stopPairingCamera();
+    showPairingCameraError(e);
+  }
+};
+H.stopPairingScan = () => { stopPairingCamera(); };
+H.allowPairing = async () => {
+  const input = document.getElementById('pairing-unlock-pin');
+  const pin = input ? input.value : undefined;
+  if (input) input.value = '';
+  try { await answerPairing(true, pin); }
+  catch (e) { showToast('Could not connect. Check your passcode and try again before the QR expires.'); }
+};
+H.rejectPairing = async () => {
+  try { await answerPairing(false); } catch (e) { showToast('Could not reject this request. It may have expired.'); }
 };

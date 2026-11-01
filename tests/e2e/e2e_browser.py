@@ -25,6 +25,56 @@ RUN = time.strftime("%H%M%S")  # dev-база живёт между запуск
 SHOT = None  # функция снимка экрана, задаётся в main()
 
 
+def check_device_info(browser) -> None:
+    """Exercise the shared classifier and real session renderer without a dev server."""
+    root = Path(__file__).resolve().parents[2]
+    page = browser.new_page()
+    page.set_content('<main id="sessions"></main>')
+    page.add_script_tag(path=str(root / "backend/static/js/lib/device-info.js"))
+    cases = [
+        ("Mozilla/5.0 (Linux; Android 14) Chrome/124.0 Mobile Safari/537.36", 0, "Android phone · Chrome"),
+        ("Mozilla/5.0 (Linux; Android 14) Chrome/124.0 Safari/537.36", 0, "Android tablet · Chrome"),
+        ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) Version/17.4 Safari/604.1", 5, "iOS phone · Safari"),
+        ("Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) Version/17.4 Safari/604.1", 5, "iPadOS tablet · Safari"),
+        ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) Version/17.4 Safari/605.1", 5, "iPadOS tablet · Safari"),
+        ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0 Safari/537.36 Edg/124.0", 0, "Windows computer · Edge"),
+        ("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) Version/17.4 Safari/605.1", 0, "macOS computer · Safari"),
+        ("Mozilla/5.0 (X11; Linux x86_64) Firefox/125.0", 0, "Linux computer · Firefox"),
+        ("Unrecognized client", 0, "Web browser"),
+    ]
+    labels = []
+    for ua, touch_points, expected in cases:
+        info = page.evaluate("([ua, touch]) => CX.deviceInfo.detect(ua, touch)", [ua, touch_points])
+        assert info["label"] == expected, info
+        labels.append(expected)
+    page.add_script_tag(content="""
+        const state = { sessions: [] };
+        const I = { back: '' };
+        function esc(value) {
+            const el = document.createElement('span');
+            el.textContent = value == null ? '' : String(value);
+            return el.innerHTML;
+        }
+        function relTime() { return 'just now'; }
+    """)
+    page.add_script_tag(path=str(root / "backend/static/js/app/views.js"))
+    names = labels + ["Chrome on macOS", "Legacy <device>", ""]
+    page.evaluate("""names => {
+        state.sessions = names.map((name, index) => ({
+            device_id: String(index), name, current: index === 0,
+            user_agent: '', ip_address: '127.0.0.1',
+            created_at: '2026-11-01T00:00:00Z', last_seen_at: '2026-11-01T00:00:00Z'
+        }));
+        document.getElementById('sessions').innerHTML = sessionsHtml();
+    }""", names)
+    rows = page.locator('.person-row__name')
+    assert rows.all_text_contents() == [names[0] + " This device"] + names[1:-1] + ["Web browser"]
+    expect(page.locator('.pill-current')).to_have_count(1)
+    expect(page.locator('device')).to_have_count(0)
+    page.close()
+    log("device info: 9 platform cases and stored/legacy session labels rendered")
+
+
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -45,6 +95,10 @@ def register(page: Page, name: str, pin: str, errors: list[str]) -> None:
     page.goto(BASE + "/login?dev=new")
     page.get_by_role("button", name="Connect TON Wallet").click()
     page.wait_for_url("**/app", timeout=15000)
+    expect(page.locator(".passcode-title")).to_have_text("Create Your Profile", timeout=15000)
+    page.locator('[data-key="setupName"]').fill(name)
+    page.locator('[data-key="setupUsername"]').fill(name.lower().replace(" ", "_"))
+    page.get_by_role("button", name="Continue").click()
     expect(page.locator(".passcode-title")).to_have_text("Create Passcode", timeout=15000)
     if name.startswith("Alice") and SHOT:
         SHOT(page, "02-create-passcode")
@@ -68,6 +122,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=None)
     ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--channel", default=None, help="Installed browser channel, e.g. chrome")
+    ap.add_argument("--device-info-only", action="store_true", help="Check platform labels and sessions without a dev server")
+    ap.add_argument("--pairing-only", action="store_true", help="Offline pairing UI and WebCrypto integration")
     args = ap.parse_args()
     shots = Path(args.shots) if args.shots else None
     if shots:
@@ -82,7 +139,16 @@ def main() -> int:
 
     errors: list[str] = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not args.headed)
+        browser = p.chromium.launch(headless=not args.headed, channel=args.channel)
+        if args.pairing_only:
+            from pairing_checks import check_pairing
+            check_pairing(browser, mobile=False)
+            browser.close()
+            return 0
+        check_device_info(browser)
+        if args.device_info_only:
+            browser.close()
+            return 0
         alice_ctx = browser.new_context(viewport={"width": 1280, "height": 820})
         bob_ctx = browser.new_context(viewport={"width": 1280, "height": 820})
         carol_ctx = browser.new_context(viewport={"width": 1280, "height": 820})
@@ -103,16 +169,30 @@ def main() -> int:
         alice.locator("#dc-draft").fill("Hello **Bob**! Here is `code` and a list:\n- one\n- two")
         alice.keyboard.press("Enter")
         expect(alice.locator(".bubble.is-mine").last).to_contain_text("Hello", timeout=10000)
+        rapid_texts = [f"Fast message {i} {RUN}" for i in range(1, 5)]
+        for message in rapid_texts:
+            alice.locator("#dc-draft").fill(message)
+            alice.keyboard.press("Enter")
+        expect(alice.locator(".bubble.is-mine .bubble__text").last).to_have_text(rapid_texts[-1], timeout=15000)
+        alice_order = alice.locator(".bubble__text").all_text_contents()
+        assert [alice_order.index(message) for message in rapid_texts] == sorted(
+            alice_order.index(message) for message in rapid_texts
+        ), f"Alice's rapid sends were reordered: {alice_order}"
         log("alice: message sent (encrypted + signed, protobuf)")
 
         # Боб получает чат по WebSocket и открывает его
         bob_thread = thread(bob, f"Alice {RUN}")
         expect(bob_thread).to_be_visible(timeout=15000)
-        expect(bob_thread.locator(".thread__badge")).to_have_text("1", timeout=10000)
+        expect(bob_thread.locator(".thread__badge")).to_have_text(str(1 + len(rapid_texts)), timeout=15000)
         bob_thread.click()
         bubble = bob.locator(".bubble").filter(has_text="Hello").last
         expect(bubble.locator("strong")).to_have_text("Bob", timeout=10000)
         expect(bubble.locator("li")).to_have_count(2)
+        expect(bob.locator(".bubble__text").last).to_have_text(rapid_texts[-1], timeout=15000)
+        bob_order = bob.locator(".bubble__text").all_text_contents()
+        assert [bob_order.index(message) for message in rapid_texts] == sorted(
+            bob_order.index(message) for message in rapid_texts
+        ), f"Bob received rapid sends out of order: {bob_order}"
         log("bob: message verified (ECDSA), decrypted, markdown rendered")
         shot(bob, "03-bob-chat")
 
@@ -182,7 +262,7 @@ def main() -> int:
         laptop.on("pageerror", lambda e: errors.append(f"laptop: {e}"))
         laptop.goto(BASE + "/login")
         laptop.get_by_role("button", name="Connect TON Wallet").click()
-        expect(laptop.locator(".passcode-title")).to_have_text("Restore Your Keys", timeout=15000)
+        expect(laptop.locator(".passcode-title")).to_have_text("Restore Account", timeout=15000)
         shot(laptop, "07-restore")
         type_pin(laptop, "9999")
         expect(laptop.locator(".gate-error")).to_contain_text("attempts left", timeout=30000)

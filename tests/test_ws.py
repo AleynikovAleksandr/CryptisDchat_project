@@ -11,6 +11,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.proto import wire
 from tests import client_crypto as cc
+from tests.conftest import login
 from tests.test_api_messaging import open_dm
 
 
@@ -40,10 +41,11 @@ async def test_ws_rejects_foreign_origin_and_bad_token(app):
             assert recv(ws)["event"] == "error"
 
 
-async def test_ws_delivers_message_typing_and_receipts(app, make_user):
+async def test_ws_delivers_message_typing_and_receipts(app, make_user, client):
     alice, bob = await make_user("Alice"), await make_user("Bob")
     thread_id, conv_key = await open_dm(alice, bob)
     packet = cc.make_packet(alice.keys, thread_id, conv_key, 1, {"text": "realtime"})
+    bob_other = await login(client, bob.wallet)
 
     with TestClient(app) as tc:
         with tc.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws_bob, \
@@ -75,7 +77,9 @@ async def test_ws_delivers_message_typing_and_receipts(app, make_user):
             ws_bob.send_bytes(wire.encode("WsFrame", {"event": "heartbeat"}))
             assert recv_until(ws_bob, "heartbeat")["event"] == "heartbeat"
 
-            # «Выйти со всех устройств» закрывает сокет
-            tc.post("/api/auth/logout-all", headers={"Authorization": f"Bearer {bob.access}"})
+            # Logging out other devices closes Bob's old socket and retains the caller.
+            headers = {"Authorization": f"Bearer {bob_other['access_token']}"}
+            assert tc.post("/api/auth/logout-all", headers=headers).status_code == 204
             assert recv_until(ws_bob, "session.revoked")["event"] == "session.revoked"
+            assert tc.get("/api/me", headers=headers).status_code == 200
     await asyncio.sleep(0)

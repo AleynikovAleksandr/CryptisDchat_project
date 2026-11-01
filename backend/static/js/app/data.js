@@ -13,6 +13,8 @@ const API = CX.api;
 const VAULT = CX.vault;
 const PBKDF2_ITERATIONS = 310000;
 const CACHE_PER_THREAD = 100;
+const imagePreviewCache = new Map();
+const imagePreviewPending = new Map();
 
 /* ============================================================
    Сессия в памяти (открытые ключи живут только пока приложение разблокировано)
@@ -62,6 +64,13 @@ async function boot() {
   let handoff = null;
   try { handoff = JSON.parse(sessionStorage.getItem('cx_login') || 'null'); } catch (e) { handoff = null; }
   const hasVault = await VAULT.exists();
+  if (new URLSearchParams(location.search).get('pair') === '1') {
+    history.replaceState(null, '', '/app');
+    if (hasVault) {
+      setGate({ mode: 'unlock', pin: '', error: 'This browser already has a local vault. Unlock it to continue.' });
+    } else await beginPairing();
+    return;
+  }
 
   if (!handoff) {
     if (hasVault) setGate({ mode: 'unlock', pin: '', lockedUntil: VAULT.lockedUntil() });
@@ -229,9 +238,13 @@ async function startApp() {
 }
 
 function wipeMemory() {
+  stopPairingCamera();
+  pairingApproval = null;
+  state.pairingApproval = null;
   router.armed = false; // до разблокировки адрес не трогаем — после неё routeStart вернёт тот же экран
   CX.ws.stop();
   clearInterval(expireTimer);
+  clearImagePreviews();
   VAULT.lock();
   Object.assign(S, { keys: null, identityPriv: null, signingPriv: null, convKeys: {}, trees: {}, cache: {}, peerKeys: {} });
   API.session.access = null;
@@ -273,8 +286,13 @@ function sessionEnded() {
   location.replace('/login?reauth=1');
 }
 
-async function logout(all) {
-  try { await API.post(all ? '/api/auth/logout-all' : '/api/auth/logout'); } catch (e) { /* уже недействительна */ }
+async function logout() {
+  try {
+    await API.post('/api/auth/logout');
+  } catch (e) {
+    showToast(errorText(e));
+    return;
+  }
   wipeMemory();
   await VAULT.wipe(); // ТЗ 6.5: при выходе локальные данные удаляются безвозвратно
   sessionStorage.clear();
@@ -614,6 +632,7 @@ async function decodeMessage(t, raw) {
     expiresAt: raw.expires_at ? parseTime(raw.expires_at).getTime() : null, confirmed: !!raw.confirmed,
     text: '',
   };
+  base.reactions = await decodeReactionRows(t, raw.reactions || []);
   try {
     // 1) ТЗ 6.2: сначала подпись — сообщение с неверной подписью отбрасывается до расшифровки
     const nonce = CXC.unb64(raw.nonce), ct = CXC.unb64(raw.ciphertext);
@@ -630,6 +649,50 @@ async function decodeMessage(t, raw) {
   } catch (e) {
     return Object.assign(base, { bad: 'decrypt', text: 'Unable to decrypt this message.' });
   }
+}
+
+async function decodeReactionRows(thread, rows) {
+  if (!rows || !rows.length) return [];
+  const decoded = [];
+  for (const row of rows) {
+    try {
+      const key = await convKey(thread, row.key_epoch);
+      if (!key) continue;
+      const emoji = CXC.fromUtf8(CXC.secretboxOpen(key, CXC.unb64(row.nonce), CXC.unb64(row.ciphertext)));
+      const expectedHash = CXC.hex(await CXC.sha256(CXC.concat(key, CXC.utf8(emoji))));
+      if (expectedHash !== row.emoji_hash) continue;
+      decoded.push({ emoji, count: Number(row.count) || 1, mine: !!row.mine });
+    } catch (e) { /* повреждённая реакция не должна скрывать само сообщение */ }
+  }
+  return decoded;
+}
+
+async function saveMessageReaction(threadId, message, emoji, active) {
+  const thread = threadById(threadId);
+  if (!thread || !message || !message.epoch) throw new Error('Conversation key is unavailable.');
+  const key = await convKey(thread, message.epoch);
+  if (!key) throw new Error('Conversation key is unavailable.');
+  const plaintext = CXC.utf8(emoji);
+  const sealed = CXC.secretboxSeal(key, plaintext);
+  const emojiHash = CXC.hex(await CXC.sha256(CXC.concat(key, plaintext)));
+  const rows = await API.put('/api/messages/' + encodeURIComponent(message.id) + '/reactions', {
+    emoji_hash: emojiHash,
+    key_epoch: message.epoch,
+    nonce: CXC.b64(sealed.nonce),
+    ciphertext: CXC.b64(sealed.ciphertext),
+    active: !!active,
+  });
+  return decodeReactionRows(thread, rows);
+}
+
+async function applyIncomingReactions(data) {
+  const list = state.messagesByThread[data.thread_id] || [];
+  const message = list.find((item) => item.id === data.message_id);
+  const thread = threadById(data.thread_id);
+  if (!message || !thread) return;
+  message.reactions = await decodeReactionRows(thread, data.reactions || []);
+  cacheMessages(data.thread_id);
+  if (state.activeThread === data.thread_id) render();
 }
 
 function contentToUi(c) {
@@ -677,13 +740,42 @@ function replaceLocal(threadId, localId, msg) {
   cacheMessages(threadId);
 }
 
-async function postPacket(t, content, extra, optimistic) {
+const messageSendQueues = new Map();
+
+function enqueueMessageBatch(threadId, jobs) {
+  const thread = threadById(threadId);
+  jobs.forEach((job) => {
+    const optimistic = job.type === 'file'
+      ? { file: { base: job.attachment.base, ext: job.attachment.ext, size: job.attachment.size }, reply: job.reply }
+      : { text: job.text, reply: job.reply };
+    job.pending = addPendingMessage(thread, optimistic);
+  });
+  const previous = messageSendQueues.get(threadId) || Promise.resolve();
+  const current = previous.catch(() => {}).then(async () => {
+    for (const job of jobs) {
+      if (job.type === 'file') await sendFile(threadId, job.attachment, job.reply, job.pending);
+      else await sendText(threadId, job.text, job.reply, job.pending);
+    }
+  });
+  messageSendQueues.set(threadId, current);
+  current.finally(() => {
+    if (messageSendQueues.get(threadId) === current) messageSendQueues.delete(threadId);
+  }).catch(() => {});
+  return current;
+}
+
+function addPendingMessage(t, optimistic) {
   const clientId = CXC.uuid();
   const localId = 'local-' + clientId;
   const time = new Date();
   // clientId черновика совпадёт с client_msg_id в message.new — по нему onIncoming узнаёт своё сообщение
   addLocal(t.id, Object.assign({ id: localId, clientId, seq: Number.MAX_SAFE_INTEGER, mine: true, pending: true, time,
                                  meta: formatMsgTime(time), senderId: S.userId, text: '' }, optimistic));
+  return { clientId, localId };
+}
+
+async function postPacket(t, content, extra, pending, optimistic) {
+  const { clientId, localId } = pending || addPendingMessage(t, optimistic || contentToUi(content));
   try {
     const packet = await sealPacket(t, content, Object.assign({ clientId }, extra));
     const saved = await API.request('POST', '/api/threads/' + t.id + '/messages',
@@ -710,11 +802,12 @@ function bumpThread(threadId) {
   state.threads = [t].concat(state.threads.filter((x) => x.id !== threadId));
 }
 
-async function sendText(threadId, text, reply) {
+async function sendText(threadId, text, reply, pending) {
   const t = threadById(threadId);
   const content = { v: 1, type: 'text', text };
   if (reply) content.reply = reply;
-  await postPacket(t, content, { replyToId: reply ? reply.id : '' }, { text, reply });
+  pending = pending || addPendingMessage(t, { text, reply });
+  await postPacket(t, content, { replyToId: reply ? reply.id : '' }, pending);
 }
 
 /* Файл шифруется на устройстве случайным ключом; ключ файла — внутри зашифрованного сообщения. */
@@ -728,23 +821,18 @@ async function encryptAndUpload(bytes) {
   return { id: up.id, key: CXC.b64(fileKey) };
 }
 
-async function sendFile(threadId, att, reply) {
+async function sendFile(threadId, att, reply, pending) {
   const t = threadById(threadId);
   const optimistic = { file: { base: att.base, ext: att.ext, size: att.size }, reply };
-  const clientId = CXC.uuid();
-  const localId = 'local-' + clientId;
-  const time = new Date();
-  addLocal(t.id, Object.assign({ id: localId, seq: Number.MAX_SAFE_INTEGER, mine: true, pending: true, time,
-                                 meta: formatMsgTime(time), senderId: S.userId, text: '' }, optimistic));
+  pending = pending || addPendingMessage(t, optimistic);
   try {
     const bytes = new Uint8Array(await att.fileObj.arrayBuffer());
     const up = await encryptAndUpload(bytes);
-    state.messagesByThread[t.id] = (state.messagesByThread[t.id] || []).filter((m) => m.id !== localId);
     const content = { v: 1, type: 'file', file: { name: att.base + att.ext, size: att.bytes, mime: att.mime, key: up.key } };
     if (reply) content.reply = reply;
-    await postPacket(t, content, { attachmentId: up.id, replyToId: reply ? reply.id : '' }, optimistic);
+    await postPacket(t, content, { attachmentId: up.id, replyToId: reply ? reply.id : '' }, pending);
   } catch (e) {
-    const m = (state.messagesByThread[t.id] || []).find((x) => x.id === localId);
+    const m = (state.messagesByThread[t.id] || []).find((x) => x.id === pending.localId);
     if (m) { m.pending = false; m.failed = true; }
     showToast(errorText(e));
     render();
@@ -754,6 +842,59 @@ async function sendFile(threadId, att, reply) {
 async function downloadAttachment(msg) {
   const bytes = await API.bytes('/api/messages/' + msg.id + '/attachment');
   return CXC.secretboxOpen(CXC.unb64(msg.file.key), bytes.subarray(0, 24), bytes.subarray(24));
+}
+
+function getImagePreview(messageId) {
+  return imagePreviewCache.get(messageId) || null;
+}
+
+function releaseImagePreview(messageId) {
+  const preview = imagePreviewCache.get(messageId);
+  if (preview && preview.url) URL.revokeObjectURL(preview.url);
+  imagePreviewCache.delete(messageId);
+}
+
+function clearImagePreviews() {
+  imagePreviewCache.forEach((preview) => { if (preview.url) URL.revokeObjectURL(preview.url); });
+  imagePreviewCache.clear();
+  imagePreviewPending.clear();
+}
+
+async function loadImagePreview(messageId) {
+  if (imagePreviewCache.has(messageId) || imagePreviewPending.has(messageId)) return;
+  const message = (state.messagesByThread[state.activeThread] || []).find((item) => item.id === messageId);
+  if (!message || !message.file || !message.file.key || message.pending || state.gate ||
+      !String(message.file.mime || '').toLowerCase().startsWith('image/')) return;
+
+  const pending = (async () => {
+    let url = null;
+    try {
+      const plain = await downloadAttachment(message);
+      if (state.gate || !API.session.access) return;
+      url = URL.createObjectURL(new Blob([plain], { type: message.file.mime || 'application/octet-stream' }));
+      const dimensions = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        image.onerror = () => reject(new Error('Unable to decode image attachment'));
+        image.src = url;
+      });
+      if (state.gate || !API.session.access) return;
+      const scale = Math.min(300 / dimensions.width, 400 / dimensions.height, 1);
+      imagePreviewCache.set(messageId, {
+        url, width: Math.max(1, Math.round(dimensions.width * scale)),
+        height: Math.max(1, Math.round(dimensions.height * scale)),
+      });
+      url = null;
+    } catch (e) {
+      imagePreviewCache.set(messageId, { error: true });
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+      imagePreviewPending.delete(messageId);
+    }
+    render();
+  })();
+  imagePreviewPending.set(messageId, pending);
+  await pending;
 }
 
 async function saveFile(msg) {
@@ -853,7 +994,11 @@ function purgeExpired() {
   let changed = false;
   for (const tid of Object.keys(state.messagesByThread)) {
     const list = state.messagesByThread[tid];
-    const kept = list.filter((m) => !m.expiresAt || m.expiresAt > now);
+    const kept = list.filter((m) => {
+      const alive = !m.expiresAt || m.expiresAt > now;
+      if (!alive) releaseImagePreview(m.id);
+      return alive;
+    });
     if (kept.length !== list.length) { state.messagesByThread[tid] = kept; changed = true; cacheMessages(tid); }
   }
   if (changed) render();
@@ -882,6 +1027,9 @@ function onWsFrame(frame, data) {
       render();
       break;
     }
+    case 'message.reactions':
+      applyIncomingReactions(data).catch(() => {});
+      break;
     case 'typing.start':
     case 'typing.stop': {
       const until = frame.event === 'typing.start' ? Date.now() + 6000 : 0;
@@ -891,7 +1039,7 @@ function onWsFrame(frame, data) {
       break;
     }
     case 'thread.updated':
-      // чат удалён (пользователь удалён из админки) или нас исключили — закрываем его
+      // чат удалён (аккаунт удалён) или нас исключили — закрываем его
       if (data.removed_user_id === S.userId || data.deleted) {
         if (state.activeThread === data.thread_id) state.activeThread = null;
       }
@@ -919,9 +1067,16 @@ function onWsFrame(frame, data) {
       reloadThreadsSoon();
       break;
     }
-    case 'session.revoked':
-      sessionEnded();
+    case 'session.revoked': {
+      // Account-wide events also reach devices whose sessions remain active.
+      let currentDevice;
+      try {
+        const payload = API.session.access.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+        currentDevice = JSON.parse(atob(payload)).did;
+      } catch (e) { break; }
+      if (data.device_id === '*' || data.device_id === currentDevice) sessionEnded();
       break;
+    }
     default:
       break;
   }
@@ -1046,7 +1201,23 @@ async function enablePush() {
   }
 }
 
+async function disablePush() {
+  try {
+    const reg = await activeWorker();
+    if (reg && reg.pushManager) {
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+    }
+    await API.del('/api/me/push-token');
+  } catch (e) {
+    console.warn('disable web push', e);
+    showToast('Could not update notification settings. Try again.');
+    throw e;
+  }
+}
+
 function notifyMessage(t, msg) {
+  if (!state.notificationsEnabled) return;
   const onScreen = !document.hidden;            // вкладка показана (пусть и в окне без фокуса)
   const focused = onScreen && document.hasFocus();
   if (focused && state.activeThread === t.id) return;  // чат и так открыт перед глазами
@@ -1059,9 +1230,15 @@ function notifyMessage(t, msg) {
 
 async function systemNotify(threadId, title, text) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  let icon = '/static/images/icon-round.png';
+  try {
+    const manifest = await fetch('/static/manifest.json', { cache: 'no-cache' }).then((r) => r.json());
+    const appIcon = (manifest.icons || []).find((item) => (item.purpose || 'any').split(/\s+/).includes('any')) || manifest.icons[0];
+    if (appIcon) icon = new URL(appIcon.src, location.origin).href;
+  } catch (_) { /* keep app icon fallback */ }
   const options = {
     body: text.length > 180 ? text.slice(0, 180).trimEnd() + '…' : text,
-    icon: '/static/images/icon-round.png', tag: 'cx-' + threadId, renotify: true, data: { threadId },
+    icon, badge: icon, tag: 'cx-' + threadId, renotify: true, data: { threadId },
   };
   // через service worker уведомления работают и на Android, а клик обрабатывает sw.js
   const reg = await activeWorker();
@@ -1100,3 +1277,380 @@ function notifyTyping(threadId, active) {
   typingSentAt = active ? now : 0;
   CX.ws.send(active ? 'typing.start' : 'typing.stop', { thread_id: threadId });
 }
+
+/* QR pairing: secrets live only in this tab; state contains public presentation data. */
+let pairingNew = null;
+let pairingGeneration = 0;
+let pairingPollTimer = null;
+let pairingCountdownTimer = null;
+let pairingCreating = false;
+let pairingRetryAt = 0;
+let pairingQuota = { limit: 3, remaining: 3 };
+let pairingCreationSettled = Promise.resolve();
+let pairingCreationResolve = null;
+let pairingCancelEpoch = 0;
+let pairingApproval = null;
+let pairingCamera = null;
+let pairingCameraGeneration = 0;
+let pairingScanning = false;
+let pairingCameraError = '';
+
+function pairingStatus(status, extra) {
+  setGate({ mode: 'pairing', status,
+    generation_limit: pairingQuota.limit,
+    generation_remaining: pairingQuota.remaining,
+    generation_retry_at: pairingRetryAt,
+    ...extra });
+  syncPairingCountdown();
+}
+
+function syncPairingCountdown() {
+  if (!pairingRetryAt || pairingRetryAt <= Date.now() || !state.gate || state.gate.mode !== 'pairing') {
+    if (pairingCountdownTimer) clearInterval(pairingCountdownTimer);
+    pairingCountdownTimer = null;
+    if (pairingRetryAt && pairingRetryAt <= Date.now()) {
+      pairingRetryAt = 0;
+      if (state.gate && state.gate.mode === 'pairing') state.gate.generation_retry_at = 0;
+      render();
+    }
+    return;
+  }
+  if (pairingCountdownTimer) return;
+  pairingCountdownTimer = setInterval(() => {
+    if (!state.gate || state.gate.mode !== 'pairing') {
+      clearInterval(pairingCountdownTimer);
+      pairingCountdownTimer = null;
+      return;
+    }
+    if (Date.now() >= pairingRetryAt) {
+      pairingRetryAt = 0;
+      state.gate.generation_retry_at = 0;
+      clearInterval(pairingCountdownTimer);
+      pairingCountdownTimer = null;
+    }
+    render();
+  }, 1000);
+}
+
+function cancelPairingRequest(p) {
+  if (!p || !p.request_id || !p.poll_secret || p.completed) return Promise.resolve();
+  return fetch('/api/auth/pairings/' + p.request_id, {
+    method: 'DELETE', headers: { 'X-Pairing-Secret': p.poll_secret }, keepalive: true,
+  }).catch(() => {});
+}
+
+async function clearPairing() {
+  pairingGeneration++;
+  clearTimeout(pairingPollTimer);
+  const p = pairingNew;
+  pairingNew = null;
+  await cancelPairingRequest(p);
+  if (p && p.vaultCreated && !p.completed) await VAULT.wipe();
+}
+
+async function beginPairing() {
+  if (pairingCreating) return;
+  const cancelEpoch = pairingCancelEpoch;
+  if (Date.now() < pairingRetryAt) {
+    const seconds = Math.ceil((pairingRetryAt - Date.now()) / 1000);
+    pairingStatus('error', { error: `Too many QR requests. Try again in ${seconds} seconds.` });
+    return;
+  }
+  pairingCreating = true;
+  pairingCreationSettled = new Promise((resolve) => { pairingCreationResolve = resolve; });
+  let generation = null;
+  try {
+    await clearPairing();
+    if (cancelEpoch !== pairingCancelEpoch) return;
+    generation = pairingGeneration;
+    pairingStatus('creating');
+    if (await VAULT.exists()) throw new Error('A local vault already exists. Unlock this device first.');
+    const keys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+    const publicKey = CXC.b64(await crypto.subtle.exportKey('spki', keys.publicKey));
+    const r = await fetch('/api/auth/pairings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ephemeral_public_key: publicKey,
+        device_name: CX.deviceInfo.detect(navigator.userAgent, navigator.maxTouchPoints).label }),
+    });
+    if (!r.ok) {
+      if (r.status === 429) {
+        let payload = {};
+        try { payload = await r.json(); } catch (e) { payload = {}; }
+        const retryAfter = Math.max(1, Number(payload.retry_after || r.headers.get('Retry-After')) || 60);
+        pairingRetryAt = Date.now() + retryAfter * 1000;
+        if (Number.isFinite(Number(payload.generation_remaining))) {
+          pairingQuota.limit = Number(payload.generation_limit) || pairingQuota.limit;
+          pairingQuota.remaining = Math.max(0, Number(payload.generation_remaining));
+        }
+        throw new Error(`Too many QR requests. Try again in ${retryAfter} seconds.`);
+      }
+      throw new Error('Could not create a QR. Try again.');
+    }
+    const data = await r.json();
+    if (generation !== pairingGeneration) { await cancelPairingRequest(data); return; }
+    const scan = await CX.pairing.parse(JSON.stringify(data.qr_payload));
+    if (generation !== pairingGeneration) { await cancelPairingRequest(data); return; }
+    if (scan.ephemeral_public_key !== publicKey || scan.request_id !== data.request_id ||
+        typeof data.poll_secret !== 'string' || !Number.isFinite(data.expires_at)) throw new Error('Invalid pairing response.');
+    const code = JSON.stringify({ version: 1, ...scan });
+    pairingQuota = {
+      limit: Number(data.generation_limit) || 3,
+      remaining: Math.max(0, Number(data.generation_remaining) || 0),
+    };
+    pairingRetryAt = 0;
+    pairingNew = { ...scan, poll_secret: data.poll_secret, privateKey: keys.privateKey, expires_at: data.expires_at };
+    pairingStatus('pending', { code, qr: CX.pairing.svg(code), expires_at: data.expires_at });
+    pairingPollTimer = setTimeout(() => pollPairing(generation), 1200);
+  } catch (e) {
+    if (generation === pairingGeneration) {
+      pairingStatus('error', { error: e.message.startsWith('Too many QR requests.') ? e.message : 'Could not create a QR. Try again.' });
+    }
+  } finally {
+    pairingCreating = false;
+    const resolve = pairingCreationResolve;
+    pairingCreationResolve = null;
+    if (resolve) resolve();
+  }
+}
+
+async function pollPairing(generation) {
+  const p = pairingNew;
+  if (!p || generation !== pairingGeneration) return;
+  try {
+    if (Date.now() >= p.expires_at * 1000) {
+      pairingNew = null; pairingStatus('expired'); return;
+    }
+    const r = await fetch('/api/auth/pairings/' + p.request_id, { headers: { 'X-Pairing-Secret': p.poll_secret }, cache: 'no-store' });
+    if (!r.ok) throw new Error('poll_failed');
+    const data = await r.json();
+    if (generation !== pairingGeneration) return;
+    if (['expired', 'rejected', 'cancelled'].includes(data.status)) {
+      pairingNew = null; pairingStatus(data.status); return;
+    }
+    if (data.status === 'approved') {
+      // Validate every authenticated binding before the vault can be created.
+      p.transferred = await CX.pairing.open(p.privateKey, p, data.envelope);
+      if (generation !== pairingGeneration) return;
+      p.privateKey = null;
+      p.operation_id = data.envelope.operation_id;
+      setGate({ mode: 'pairing-pin', pin: '' });
+      return;
+    }
+  } catch (e) {
+    if (generation !== pairingGeneration) return;
+    if (p.transferred || e.message !== 'poll_failed' && !(e instanceof TypeError)) {
+      await clearPairing(); pairingStatus('error', { error: 'Could not verify transferred keys. Generate a new QR.' }); return;
+    }
+    // Network errors keep the same request, key and secret; never create a second request implicitly.
+  }
+  if (generation === pairingGeneration) pairingPollTimer = setTimeout(() => pollPairing(generation), 2000);
+}
+
+async function finishPairing(pin) {
+  const p = pairingNew;
+  if (!p || !p.transferred || p.busy) return;
+  p.busy = true;
+  try {
+    if (!p.vaultCreated) {
+      if (!/^\d{4}$/.test(pin)) throw new Error('Invalid passcode');
+      if (!await VAULT.verifyPin(pin, p.transferred.pin_verifier)) {
+        setGate({ mode: 'pairing-pin', pin: '', error: 'That passcode does not match the approving device. Try again.' });
+        return;
+      }
+      const localState = { ...p.transferred };
+      delete localState.pin_verifier;
+      await VAULT.create(pin, localState);
+      p.transferred = localState;
+      p.vaultCreated = true;
+    }
+    pairingStatus('completing');
+    // Completion is retryable with the same operation ID. No session is issued before vault creation.
+    const r = await fetch('/api/auth/pairings/' + p.request_id + '/complete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Pairing-Secret': p.poll_secret },
+      body: JSON.stringify({ operation_id: p.operation_id }),
+    });
+    if (!r.ok) throw new Error('completion_failed');
+    const data = await r.json();
+    if (!data.user || data.user.id !== p.transferred.user_id || !data.access_token || !data.refresh_token) throw new Error('completion_invalid');
+    const saved = { ...p.transferred, refresh: data.refresh_token };
+    await VAULT.save(saved, true);
+    p.completed = true;
+    S.userId = saved.user_id; S.keys = saved.keys; S.convKeys = saved.conv; S.trees = saved.trees; S.cache = {};
+    API.session.access = data.access_token; API.session.refresh = data.refresh_token;
+    state.me = data.user;
+    await importKeys();
+    pairingNew = null; pairingGeneration++;
+    sessionStorage.removeItem('cx_login');
+    history.replaceState(null, '', '/app');
+    await startApp();
+  } catch (e) {
+    if (!p.vaultCreated) {
+      setGate({ mode: 'pairing-pin', pin: '', error: 'Could not protect this device. Enter your passcode again.' });
+    } else {
+      pairingStatus('complete-error', { error: 'Could not finish connecting. Retry on this page to keep the same request.' });
+    }
+  } finally { p.busy = false; }
+}
+
+function stopPairingCamera() {
+  pairingCameraGeneration++;
+  if (pairingCamera) pairingCamera.getTracks().forEach((track) => track.stop());
+  pairingCamera = null;
+  pairingScanning = false;
+  pairingCameraError = '';
+  const video = document.getElementById('pairing-camera');
+  if (video) { video.pause(); video.srcObject = null; video.hidden = true; }
+  const scanner = document.querySelector('.pairing-scanner');
+  if (scanner) scanner.hidden = true;
+}
+
+function showPairingCameraError(error) {
+  pairingScanning = true;
+  pairingCameraError = error && error.name === 'WebRTCUnavailableError'
+    ? 'Camera access is blocked by the browser or a WebRTC privacy control. If WebRTC Control is enabled, allow WebRTC for this site, then try again.'
+    : error && ['NotAllowedError', 'PermissionDeniedError', 'SecurityError'].includes(error.name)
+      ? 'Camera access is blocked. Check site camera permission and any WebRTC privacy controls, then try again.'
+    : error && error.name === 'NotFoundError'
+      ? 'No camera was found. You can paste the pairing code instead.'
+      : 'Could not start the camera. Check browser permissions and try again, or paste the code.';
+  const scanner = document.querySelector('.pairing-scanner');
+  if (scanner) scanner.hidden = false;
+  const hint = document.querySelector('.pairing-scanner__hint');
+  if (hint) hint.textContent = pairingCameraError;
+  const retry = document.querySelector('.pairing-scanner__retry');
+  if (retry) retry.hidden = false;
+}
+
+async function inspectPairing(code) {
+  stopPairingCamera();
+  const scan = await CX.pairing.parse(code);
+  const inspected = await API.post('/api/auth/pairings/' + scan.request_id + '/inspect', scan);
+  if (state.view !== 'pairing-approve' || state.gate) return;
+  // The recipient key stays pinned to the scanned code, never server metadata.
+  pairingApproval = { scan, operation_id: CXC.uuid(), expires_at: inspected.expires_at };
+  set({ pairingApproval: { status: 'confirm', device_name: inspected.device_name, expires_at: inspected.expires_at } });
+}
+
+async function answerPairing(allow, pin) {
+  const p = pairingApproval;
+  if (!p || p.busy) return;
+  p.busy = true;
+  try {
+    if (Date.now() >= p.expires_at * 1000) throw new Error('This QR has expired. Ask the new device to generate another.');
+    if (allow) {
+      let st = vaultState();
+      if (!VAULT.isUnlocked()) st = await VAULT.unlock(pin);
+      if (!st.keys || st.user_id !== S.userId) throw new Error('Unlock the current account before connecting a device.');
+      if (!p.envelope) p.envelope = await CX.pairing.seal(p.scan, st, p.operation_id, await VAULT.createPinVerifier());
+      await API.post('/api/auth/pairings/' + p.scan.request_id + '/approve', { ...p.scan, envelope: p.envelope });
+    } else await API.post('/api/auth/pairings/' + p.scan.request_id + '/reject', p.scan);
+    pairingApproval = null;
+    set({ pairingApproval: { status: allow ? 'approved' : 'rejected' } });
+  } finally { p.busy = false; }
+}
+
+async function startPairingCamera() {
+  stopPairingCamera();
+  const generation = pairingCameraGeneration;
+  pairingScanning = true;
+  const scanner = document.querySelector('.pairing-scanner');
+  if (scanner) scanner.hidden = false;
+  const hint = document.querySelector('.pairing-scanner__hint');
+  if (hint) hint.textContent = 'Align the QR code inside the frame';
+  const retry = document.querySelector('.pairing-scanner__retry');
+  if (retry) retry.hidden = true;
+  if (!window.BarcodeDetector && typeof window.jsQR !== 'function') {
+    throw new Error('Camera scanning is unavailable in this browser. Paste the code instead.');
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const error = new Error('WebRTC camera access is unavailable');
+    error.name = 'WebRTCUnavailableError';
+    throw error;
+  }
+  let detector = null;
+  if (window.BarcodeDetector) {
+    try { detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { detector = null; }
+  }
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!detector && (!context || typeof window.jsQR !== 'function')) {
+    throw new Error('QR scanning is unavailable in this browser. Paste the code instead.');
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+  if (generation !== pairingCameraGeneration || state.view !== 'pairing-approve' || state.gate) {
+    stream.getTracks().forEach((track) => track.stop()); return;
+  }
+  pairingCamera = stream;
+  const video = document.getElementById('pairing-camera');
+  video.hidden = false;
+  video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = stream;
+  await video.play();
+  if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) {
+    await new Promise((resolve, reject) => {
+      let timeout;
+      const clean = () => {
+        clearTimeout(timeout);
+        video.removeEventListener('loadeddata', onReady);
+        video.removeEventListener('resize', onReady);
+        video.removeEventListener('error', onError);
+      };
+      const onReady = () => {
+        if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) return;
+        clean(); resolve();
+      };
+      const onError = () => { clean(); reject(new Error('Camera preview did not start')); };
+      video.addEventListener('loadeddata', onReady);
+      video.addEventListener('resize', onReady);
+      video.addEventListener('error', onError);
+      timeout = setTimeout(() => { clean(); reject(new Error('Camera preview did not start')); }, 8000);
+      onReady();
+    });
+  }
+  let nativeDetectorMisses = 0;
+  const read = async () => {
+    if (generation !== pairingCameraGeneration) return;
+    if (state.view !== 'pairing-approve' || state.gate || !video.isConnected) { stopPairingCamera(); return; }
+    try {
+      let rawValue = '';
+      if (detector) {
+        try {
+          const codes = await detector.detect(video);
+          if (codes.length) rawValue = codes[0].rawValue;
+          else if (++nativeDetectorMisses >= 8) detector = null;
+        } catch (e) {
+          // Some browsers expose BarcodeDetector but cannot decode video
+          // frames reliably. Switch to the bundled decoder instead of
+          // retrying a detector that will never return a QR code.
+          detector = null;
+        }
+      }
+      if (!rawValue && !detector && context && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth && video.videoHeight) {
+        const scale = Math.min(1, 640 / video.videoWidth);
+        canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const frame = context.getImageData(0, 0, canvas.width, canvas.height);
+        const code = window.jsQR(frame.data, frame.width, frame.height, { inversionAttempts: 'dontInvert' });
+        if (code) rawValue = code.data;
+      }
+      if (rawValue) { await inspectPairing(rawValue); return; }
+    } catch (e) {
+      // A detector can reject a frame while the camera is warming up or the
+      // browser is switching camera focus. Keep the scanner open and retry;
+      // closing here made the camera view flash and disappear on some phones.
+      if (generation !== pairingCameraGeneration) return;
+    }
+    setTimeout(read, 250);
+  };
+  read();
+}
+
+window.addEventListener('pagehide', () => {
+  stopPairingCamera();
+  cancelPairingRequest(pairingNew);
+  pairingNew = null; pairingApproval = null; pairingGeneration++;
+  clearTimeout(pairingPollTimer);
+});

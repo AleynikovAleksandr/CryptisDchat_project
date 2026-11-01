@@ -12,11 +12,14 @@ const EVENTS = {
 const SELECTOR = '[data-click],[data-input],[data-keydown],[data-focus],[data-blur],[data-mouseenter],[data-mouseleave],[data-scroll]';
 
 function bindOne(el) {
-  if (el.__bound) return;
-  el.__bound = true;
+  const bound = el.__boundHandlers || (el.__boundHandlers = {});
   Object.keys(EVENTS).forEach((type) => {
     const name = el.getAttribute(EVENTS[type]);
-    if (name && H[name]) el.addEventListener(type, H[name]);
+    const handler = name && H[name] ? H[name] : null;
+    if (bound[type] === handler) return;
+    if (bound[type]) el.removeEventListener(type, bound[type]);
+    if (handler) el.addEventListener(type, handler);
+    bound[type] = handler;
   });
 }
 function bindEvents(root) {
@@ -112,6 +115,31 @@ const elSidebar = document.getElementById('sidebar');
 const elMain = document.getElementById('main');
 const elOverlays = document.getElementById('overlays');
 const elApp = document.querySelector('.app');
+const elSidebarResizer = document.getElementById('sidebar-resizer');
+let chatImageObserver = null;
+
+function observeChatImages() {
+  const placeholders = elMain.querySelectorAll('.chat-image-placeholder[data-image-id]');
+  if (!placeholders.length) {
+    if (chatImageObserver) chatImageObserver.disconnect();
+    return;
+  }
+  if (!('IntersectionObserver' in window)) {
+    placeholders.forEach((el) => loadImagePreview(el.getAttribute('data-image-id')));
+    return;
+  }
+  if (chatImageObserver) chatImageObserver.disconnect();
+  const root = document.getElementById('chatScroll');
+  if (!root) return;
+  chatImageObserver = new IntersectionObserver((entries, observer) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      observer.unobserve(entry.target);
+      loadImagePreview(entry.target.getAttribute('data-image-id'));
+    });
+  }, { root, rootMargin: '320px 0px' });
+  placeholders.forEach((el) => chatImageObserver.observe(el));
+}
 
 /* Удаление поля в фокусе заставляет браузер синхронно послать blur,
    его обработчик вызывает setState — и отрисовка запускается заново
@@ -125,10 +153,14 @@ function render() {
   try {
     // пока приложение заблокировано (PIN) — только экран ввода кода, без списка чатов
     elSidebar.hidden = !!state.gate;
+    elSidebarResizer.hidden = !!state.gate;
     elSidebar.classList.toggle('is-collapsed', !sidebarExpanded());
+    elApp.style.setProperty('--sidebar-width', state.sidebarWidth + 'px');
+    elApp.style.setProperty('--sidebar-resizer-left', (sidebarExpanded() ? state.sidebarWidth : 76) + 'px');
     elApp.classList.toggle('show-main', showsMain());
     if (!state.gate) patch(elSidebar, sidebarHtml());
     patch(elMain, state.gate ? gateHtml() : mainHtml());
+    observeChatImages();
     patch(elOverlays, overlaysHtml());
   } finally {
     flushHiddenText();
@@ -141,7 +173,105 @@ function render() {
   }
 }
 
+let resizingSidebar = false, resizeStartX = 0, resizeStartWidth = 0, resizeWidth = initialSidebarWidth;
+let resizeCollapsed = false;
+elSidebarResizer.addEventListener('pointerdown', (e) => {
+  if (isMobile() || state.gate) return;
+  e.preventDefault();
+  resizingSidebar = true;
+  resizeStartX = e.clientX;
+  resizeStartWidth = sidebarExpanded() ? state.sidebarWidth : 76;
+  resizeWidth = state.sidebarWidth;
+  resizeCollapsed = !sidebarExpanded();
+  elSidebarResizer.setPointerCapture(e.pointerId);
+  document.querySelector('.app-row').classList.add('is-resizing');
+});
+elSidebarResizer.addEventListener('pointermove', (e) => {
+  if (!resizingSidebar) return;
+  const rawWidth = resizeStartWidth + e.clientX - resizeStartX;
+  const collapsed = rawWidth < 170;
+  const width = collapsed ? 76 : Math.max(240, Math.min(520, rawWidth));
+  resizeWidth = collapsed ? state.sidebarWidth : width;
+  resizeCollapsed = collapsed;
+  elApp.style.setProperty('--sidebar-width', width + 'px');
+  elApp.style.setProperty('--sidebar-resizer-left', width + 'px');
+  const wasCollapsed = elSidebar.classList.contains('is-collapsed');
+  elSidebar.classList.toggle('is-collapsed', collapsed);
+  if (wasCollapsed !== collapsed) {
+    state.sidebarOpen = !collapsed;
+    if (!collapsed) state.sidebarWidth = width;
+    render();
+  }
+});
+function finishSidebarResize(e) {
+  if (!resizingSidebar) return;
+  resizingSidebar = false;
+  if (elSidebarResizer.hasPointerCapture(e.pointerId)) elSidebarResizer.releasePointerCapture(e.pointerId);
+  document.querySelector('.app-row').classList.remove('is-resizing');
+  state.sidebarWidth = resizeWidth;
+  state.sidebarOpen = !resizeCollapsed;
+  localStorage.setItem('cx-sidebar-width', String(resizeWidth));
+  render();
+}
+elSidebarResizer.addEventListener('pointerup', finishSidebarResize);
+elSidebarResizer.addEventListener('pointercancel', finishSidebarResize);
+elSidebarResizer.addEventListener('keydown', (e) => {
+  if (isMobile() || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+  e.preventDefault();
+  const width = Math.max(240, Math.min(520, state.sidebarWidth + (e.key === 'ArrowRight' ? 24 : -24)));
+  state.sidebarWidth = width;
+  state.sidebarOpen = true;
+  localStorage.setItem('cx-sidebar-width', String(width));
+  render();
+});
+
 bindLongPress(elMain);
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.emojiPicker) {
+    e.preventDefault();
+    H.closeEmojiPicker();
+  }
+});
+
+let fileDragDepth = 0;
+function hasDraggedFiles(e) {
+  const transfer = e.dataTransfer;
+  return !!(transfer && (
+    Array.from(transfer.types || []).includes('Files') ||
+    Array.from(transfer.items || []).some((item) => item.kind === 'file')
+  ));
+}
+function setChatDropActive(active) {
+  fileDragDepth = active ? Math.max(fileDragDepth, 1) : 0;
+  if (state.fileDropActive !== active) setState({ fileDropActive: active });
+}
+elMain.addEventListener('dragenter', (e) => {
+  if (!hasDraggedFiles(e) || !elMain.querySelector('.chat')) return;
+  e.preventDefault();
+  fileDragDepth += 1;
+  if (!state.fileDropActive) setState({ fileDropActive: true });
+});
+elMain.addEventListener('dragover', (e) => {
+  if (!hasDraggedFiles(e) || !elMain.querySelector('.chat')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+elMain.addEventListener('dragleave', (e) => {
+  if (!hasDraggedFiles(e) || !state.fileDropActive) return;
+  fileDragDepth = Math.max(0, fileDragDepth - 1);
+  if (!fileDragDepth) setChatDropActive(false);
+});
+elMain.addEventListener('drop', (e) => {
+  if (!hasDraggedFiles(e)) return;
+  e.preventDefault();
+  const files = e.dataTransfer.files;
+  setChatDropActive(false);
+  H.addFiles(files);
+});
+window.addEventListener('dragend', () => { if (state.fileDropActive) setChatDropActive(false); });
+window.addEventListener('dragover', (e) => { if (hasDraggedFiles(e)) e.preventDefault(); });
+window.addEventListener('drop', (e) => { if (hasDraggedFiles(e)) e.preventDefault(); });
 
 /* Экранная клавиатура: iOS не уменьшает 100dvh, а сдвигает страницу. На телефоне высота
  * приложения берётся из visualViewport, чтобы композер оставался прямо над клавиатурой. */

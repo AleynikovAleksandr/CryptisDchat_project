@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Device, PushToken, RefreshToken, User, UserSettings, UserWallet, utcnow
@@ -99,10 +99,17 @@ class UserRepository:
     async def get_device(self, device_id: str) -> Device | None:
         return await self.s.get(Device, device_id)
 
-    async def active_devices(self, user_id: str) -> list[Device]:
-        rows = await self.s.scalars(
-            select(Device).where(Device.user_id == user_id, Device.revoked_at.is_(None)).order_by(Device.last_seen_at.desc())
-        )
+    async def active_devices(self, user_id: str, *, for_update: bool = False) -> list[Device]:
+        if for_update:
+            # Serialize session-removal decisions for this account across API workers.
+            await self.s.execute(select(User.id).where(User.id == user_id).with_for_update())
+        stmt = select(Device).where(
+            Device.user_id == user_id, Device.revoked_at.is_(None)
+        ).order_by(Device.last_seen_at.desc())
+        if for_update:
+            # A locking read sees the latest committed state under MariaDB REPEATABLE READ.
+            stmt = stmt.with_for_update()
+        rows = await self.s.scalars(stmt)
         return list(rows)
 
     async def add_refresh_token(self, user_id: str, device_id: str, token_hash: str, expires_at: datetime) -> RefreshToken:
@@ -135,6 +142,25 @@ class UserRepository:
         )
         return device_ids
 
+    async def revoke_all_except(self, user_id: str, current_device_id: str) -> list[str]:
+        device_ids = [
+            d.id for d in await self.active_devices(user_id, for_update=True)
+            if d.id != current_device_id
+        ]
+        if not device_ids:
+            return []
+        now = utcnow()
+        await self.s.execute(
+            update(Device).where(Device.id.in_(device_ids)).values(revoked_at=now)
+        )
+        await self.s.execute(
+            update(RefreshToken).where(
+                RefreshToken.user_id == user_id, RefreshToken.device_id.in_(device_ids),
+                RefreshToken.revoked_at.is_(None),
+            ).values(revoked_at=now)
+        )
+        return device_ids
+
     async def upsert_push_token(self, user_id: str, device_id: str, platform: str, token: str) -> None:
         existing = await self.s.scalar(
             select(PushToken).where(PushToken.device_id == device_id, PushToken.platform == platform)
@@ -143,3 +169,6 @@ class UserRepository:
             existing.token = token
         else:
             self.s.add(PushToken(user_id=user_id, device_id=device_id, platform=platform, token=token))
+
+    async def delete_push_token(self, device_id: str, platform: str = "webpush") -> None:
+        await self.s.execute(delete(PushToken).where(PushToken.device_id == device_id, PushToken.platform == platform))

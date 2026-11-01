@@ -8,7 +8,6 @@
   * SQLite вместо MariaDB                             data_warehouses/dev/dev.db
   * три realm-сервиса резервного копирования ключей   127.0.0.1:9101..9103
   * Celery worker (все очереди) и Celery beat         дочерние процессы
-  * Flask-админка (admin / devpassword123)            http://127.0.0.1:3891/admin/
   * FastAPI: API + WebSocket + страницы               http://localhost:3890
 
 Блокчейн — mock (подтверждение через ~3 с), вход — dev-кошелёк (DEV_WALLET_LOGIN).
@@ -46,7 +45,6 @@ ENV = {
     "CHAIN_BATCH_INTERVAL_SECONDS": "15",
     "REALM_URLS": "http://127.0.0.1:9101,http://127.0.0.1:9102,http://127.0.0.1:9103",
     "REALM_API_TOKEN": "dev-realm-token",
-    "ADMIN_SECRET_KEY": "dev-admin-secret",
     "WEBHOOK_SECRET": "dev-webhook-secret",
     "DB_BACKUP_DIR": str(DATA / "backups"),
 }
@@ -94,23 +92,6 @@ def start_realms() -> None:
         serve(realm_app(data_dir=DATA / f"realm{i + 1}", api_token=ENV["REALM_API_TOKEN"]), 9101 + i, f"realm{i + 1}")
 
 
-def start_admin() -> None:
-    from werkzeug.serving import make_server
-
-    from admin_app import create_app, db
-    from admin_app.commands import upsert_admin
-
-    app = create_app()
-    with app.app_context():
-        from sqlalchemy import select
-
-        from app.models import AdminUser
-        if db.session.scalar(select(AdminUser).where(AdminUser.username == "admin")) is None:
-            upsert_admin("admin", "devpassword123")
-    server = make_server("127.0.0.1", 3891, app, threaded=True)
-    threading.Thread(target=server.serve_forever, daemon=True, name="admin").start()
-
-
 def start_celery() -> list[subprocess.Popen]:
     env = {**os.environ, "PYTHONPATH": f"{ROOT / 'backend'}{os.pathsep}{ROOT}"}
     celery = [sys.executable, "-m", "celery", "-A", "worker.celery_app"]
@@ -128,7 +109,6 @@ def main() -> None:
     time.sleep(0.5)
     init_db()
     start_realms()
-    start_admin()
     procs = start_celery() + ([redis_proc] if redis_proc else [])
     time.sleep(1.5)
     # публичные ключи realm нужны клиентам для резервной копии — публикуем сразу
@@ -145,7 +125,7 @@ def main() -> None:
 
     print("\n  CryptisDchat dev stack is up")
     print("  ─ app:    http://localhost:3890        (dev wallet login; add ?dev=new for another user)")
-    print("  ─ admin:  http://127.0.0.1:3891/admin/  (admin / devpassword123)\n")
+    print()
 
     import uvicorn
 

@@ -2,7 +2,6 @@
 
 Одна и та же `Base` подключается:
   * в FastAPI — через асинхронный движок (asyncmy);
-  * во Flask-админке — через Flask-SQLAlchemy (`SQLAlchemy(model_class=Base)`);
   * в Celery — через синхронный движок (pymysql).
 """
 from __future__ import annotations

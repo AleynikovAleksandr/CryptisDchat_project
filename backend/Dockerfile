@@ -1,4 +1,4 @@
-# Образ backend: FastAPI (API + WebSocket + Login.html/cryptis.html) и Flask-админка.
+# Образ backend: FastAPI (API + WebSocket + Login.html/cryptis.html).
 # Собирается из корня проекта: docker build -f backend/Dockerfile .
 
 # --- этап 1: клиент — все скрипты страницы в один минифицированный файл, без source map ---
@@ -37,7 +37,7 @@ RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --no-create-home a
  && mkdir -p /app/uploads /app/data_warehouses/gunicorn \
  && chown -R app:app /app/uploads /app/data_warehouses
 
-EXPOSE 8000 8001
+EXPOSE 8000
 # в compose пользователь переопределяется на владельца каталогов хоста (HOST_UID/HOST_GID)
 USER app
 CMD ["gunicorn", "-c", "gunicorn.conf.py", "app.main:app"]

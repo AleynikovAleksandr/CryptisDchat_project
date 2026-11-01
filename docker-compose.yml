@@ -115,28 +115,6 @@ services:
     networks:
       - cryptis_network
 
-  admin:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: cryptis_admin
-    restart: unless-stopped
-    user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
-    env_file: .env
-    environment:
-      DB_HOST: proxysql
-      DB_PORT: "6033"
-    depends_on:
-      proxysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: gunicorn -c gunicorn_admin.conf.py admin_app.wsgi:app
-    ports:
-      - "3891:8001"
-    networks:
-      - cryptis_network
-
   # HTTPS-вход с публичным сертификатом Let's Encrypt на IP (профиль shortlived, caddy/Caddyfile):
   # без HTTPS браузер по http://<IP> отключает Web Crypto и вход не работает.
   # Сертификаты и учётная запись ACME — в томе caddy_data. Версия закреплена: IP-сертификаты
@@ -159,12 +137,10 @@ services:
       - caddy_data:/data
     depends_on:
       - backend
-      - admin
     ports:
       # 80 — только проверка ACME HTTP-01 при выдаче и продлении сертификата (каждые несколько дней)
       - "80:80"
       - "${HTTPS_APP_PORT:-3443}:3443"
-      - "${HTTPS_ADMIN_PORT:-3444}:3444"
     networks:
       - cryptis_network
 

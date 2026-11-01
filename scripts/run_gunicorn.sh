@@ -16,12 +16,10 @@
 #      (первая инициализация MariaDB со schema.sql может занять пару минут);
 #   4. этап 2 — приложение:
 #        backend — Gunicorn + UvicornWorker: FastAPI, WebSocket, Login.html/cryptis.html  (:3890)
-#        admin   — Gunicorn + gthread: Flask-админка и вебхуки                             (:3891)
-#        caddy   — HTTPS с сертификатом Let's Encrypt на IP: приложение :3443, админка :3444 (:80 — проверка ACME)
+#        caddy   — HTTPS с сертификатом Let's Encrypt на IP (:80 — проверка ACME)
 #        worker, worker_fast, beat — Celery;
 #   5. ждёт, пока backend ответит на /healthz, и проверяет, что работают ВСЕ 11 контейнеров —
 #      если какой-то упал, показывает его логи;
-#   6. создаёт администратора Flask-панели из ADMIN_USERNAME и ADMIN_PASSWORD_HASH (или ADMIN_PASSWORD) в .env.
 #
 # Контейнеры приложения работают от пользователя, запустившего скрипт (id -u / id -g), а не от root:
 # так у них всегда есть права на запись в logs/ и data_warehouses/.
@@ -34,7 +32,7 @@ say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31mошибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
 INFRA=(db redis proxysql realm1 realm2 realm3)
-APP=(backend admin caddy worker worker_fast beat)
+APP=(backend caddy worker worker_fast beat)
 ALL=("${INFRA[@]}" "${APP[@]}")
 
 # владелец файлов в смонтированных каталогах — тот, кто запускает скрипт (подставляется в compose)
@@ -60,8 +58,8 @@ env_value() { grep -E "^$1=" "${2:-.env}" | head -1 | cut -d= -f2- | tr -d '\r';
 # обязательные переменные .env и секреты, которые нельзя оставлять заглушками change-me-*
 REQUIRED=(APP_ENV HTTPS_HOST PUBLIC_ORIGIN ALLOWED_WS_ORIGINS TON_PROOF_DOMAIN
           DB_NAME DB_USER DB_PASSWORD DB_ROOT_PASSWORD
-          JWT_SECRET TON_PROOF_SECRET ADMIN_SECRET_KEY ADMIN_USERNAME WEBHOOK_SECRET)
-SECRETS=(DB_PASSWORD DB_ROOT_PASSWORD JWT_SECRET TON_PROOF_SECRET ADMIN_SECRET_KEY ADMIN_PASSWORD WEBHOOK_SECRET)
+          JWT_SECRET TON_PROOF_SECRET WEBHOOK_SECRET)
+SECRETS=(DB_PASSWORD DB_ROOT_PASSWORD JWT_SECRET TON_PROOF_SECRET WEBHOOK_SECRET)
 
 check_env() {
   local problems=() k v host app_port origin ws
@@ -78,10 +76,7 @@ check_env() {
     v="$(env_value "$k" || true)"
     [[ "$v" != change-me* ]] || problems+=("$k — заглушка change-me-*; сгенерируйте: openssl rand -hex 32")
   done
-  # пароль админки: лучше хеш (ADMIN_PASSWORD_HASH), открытый ADMIN_PASSWORD — запасной вариант
-  [[ -n "$(env_value ADMIN_PASSWORD_HASH || true)$(env_value ADMIN_PASSWORD || true)" ]] \
-    || problems+=("ADMIN_PASSWORD_HASH — пустой; получите хеш: docker compose run --rm admin flask --app admin_app.wsgi hash-password")
-  for k in HTTPS_APP_PORT HTTPS_ADMIN_PORT DB_EXTERNAL_PORT; do
+  for k in HTTPS_APP_PORT DB_EXTERNAL_PORT; do
     v="$(env_value "$k" || true)"
     [[ -z "$v" || "$v" =~ ^[0-9]+$ ]] || problems+=("$k=$v — должен быть номером порта")
   done
@@ -127,9 +122,8 @@ check_ports() {
   local ours busy=() p owner v
   ours="$(compose ps -q 2>/dev/null || true)"
   # 80 — проверка ACME (Let's Encrypt) для сертификата Caddy
-  local ports=(80 "$(v="$(env_value DB_EXTERNAL_PORT || true)"; echo "${v:-3307}")" 3890 3891 6390 8096
-               "$(v="$(env_value HTTPS_APP_PORT || true)"; echo "${v:-3443}")"
-               "$(v="$(env_value HTTPS_ADMIN_PORT || true)"; echo "${v:-3444}")")
+  local ports=(80 "$(v="$(env_value DB_EXTERNAL_PORT || true)"; echo "${v:-3307}")" 3890 6390 8096
+               "$(v="$(env_value HTTPS_APP_PORT || true)"; echo "${v:-3443}")")
   for p in "${ports[@]}"; do
     ss -ltnH "sport = :$p" 2>/dev/null | grep -q . || continue
     owner="$(docker ps --no-trunc -q --filter "publish=$p" 2>/dev/null | head -1)"
@@ -141,7 +135,7 @@ check_ports() {
       printf '  порт %s занят: %s\n' "$p" \
         "$(sudo -n ss -ltnpH "sport = :$p" 2>/dev/null | grep -o 'users:.*' | head -1 || true)" >&2
     done
-    fail "порты заняты: ${busy[*]} — освободите их или смените порт в .env (DB_EXTERNAL_PORT, HTTPS_APP_PORT, HTTPS_ADMIN_PORT) / docker-compose.yml"
+    fail "порты заняты: ${busy[*]} — освободите их или смените порт в .env (DB_EXTERNAL_PORT, HTTPS_APP_PORT) / docker-compose.yml"
   fi
   say "порты в порядке (свободны или заняты нашими контейнерами): ${ports[*]}"
 }
@@ -193,7 +187,7 @@ up() {
   wait_healthy redis 60
   wait_healthy proxysql 90   # пул соединений к MariaDB: приложение ходит в базу только через него
 
-  say "этап 2: запуск приложения (${APP[*]}) — Gunicorn в backend и admin…"
+  say "этап 2: запуск приложения (${APP[*]}) — Gunicorn в backend…"
   compose up -d --build "${APP[@]}"
 
   say "ожидание backend…"
@@ -205,19 +199,14 @@ up() {
   check_all
   curl -fsS http://localhost:3890/healthz >/dev/null 2>&1 || fail "backend не отвечает на /healthz"
 
-  say "создание администратора Flask-панели…"
-  compose exec -T admin python database/initial_data.py
-
-  local https_host app_port admin_port
+  local https_host app_port
   https_host="$(env_value HTTPS_HOST || true)"
   app_port="$(env_value HTTPS_APP_PORT || true)"; app_port="${app_port:-3443}"
-  admin_port="$(env_value HTTPS_ADMIN_PORT || true)"; admin_port="${admin_port:-3444}"
 
   cat <<EOF
 
   CryptisDchat запущен — все ${#ALL[@]} контейнеров работают
   ─ приложение:  https://${https_host}:${app_port}   (или http://localhost:3890 через SSH/VS Code)
-  ─ админка:     https://${https_host}:${admin_port}/admin/   логин: $(env_value ADMIN_USERNAME)   (пароль в .env не хранится — только хеш)
   ─ состояние:   scripts/run_gunicorn.sh status
   ─ остановка:   scripts/run_gunicorn.sh down
 

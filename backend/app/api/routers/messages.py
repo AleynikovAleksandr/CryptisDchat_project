@@ -19,6 +19,8 @@ from app.schemas.messages import (
     ForwardIn,
     MessageOut,
     MessageProofOut,
+    MessageReactionIn,
+    MessageReactionOut,
     MessagesPageOut,
     SendMessageIn,
     UploadOut,
@@ -81,6 +83,12 @@ async def search(thread_id: str, q: list[str] = Query(default_factory=list),
     (по токену на каждую известную клиенту эпоху ключа). Сервер не знает, какие слова ищут."""
     groups = [[t.strip() for t in item.split(",") if t.strip()] for item in q]
     return await s.search(cu.user, thread_id, groups)
+
+
+@router.put("/messages/{message_id}/reactions", response_model=list[MessageReactionOut])
+async def set_reaction(message_id: str, body: MessageReactionIn, cu: CurrentUser = Depends(current_user),
+                       s: MessageService = Depends(svc)):
+    return await s.set_reaction(cu.user, message_id, body)
 
 
 @router.post("/messages/{message_id}/forward", response_model=MessageOut, status_code=201)

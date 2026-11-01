@@ -6,6 +6,7 @@
    ============================================================ */
 const GATE_TEXT = {
   boot: ['CryptisDchat', 'Loading…'],
+  'pairing-pin': ['Enter Your Passcode', 'Enter the passcode from the device that approved this connection. It will protect the keys stored on this device.'],
   'profile-setup': ['Create Your Profile', 'Enter the name people will see and choose a unique username.'],
   unlock: ['Enter Passcode', 'Your passcode unlocks the encrypted messages and keys stored on this device.'],
   setup: ['Create Passcode', 'This passcode protects your encryption keys on this device and restores them on a new one. Without it, you will not be able to access your messages.'],
@@ -25,8 +26,9 @@ function dotsHtml(value, error) {
 
 function gateHtml() {
   const g = state.gate || { mode: 'boot' };
+  if (g.mode === 'pairing') return pairingGateHtml(g);
   const [title, text] = GATE_TEXT[g.mode] || GATE_TEXT.boot;
-  const needsPin = ['unlock', 'setup', 'setup-confirm', 'restore'].includes(g.mode);
+  const needsPin = ['unlock', 'setup', 'setup-confirm', 'restore', 'pairing-pin'].includes(g.mode);
   const locked = g.lockedUntil > Date.now();
   let body = '';
   if (g.mode === 'profile-setup') {
@@ -59,7 +61,9 @@ function gateHtml() {
   } else {
     body = '<div class="gate-spinner"></div><div class="passcode-text">' + esc(g.text || '') + '</div>';
   }
-  const foot = g.mode === 'profile-setup' || g.mode === 'unlock' || g.mode === 'restore' || g.mode === 'reset'
+  const foot = g.mode.startsWith('pairing-pin')
+    ? '<button class="gate-link" type="button" data-click="cancelPairing">Cancel</button>'
+    : g.mode === 'profile-setup' || g.mode === 'unlock' || g.mode === 'restore' || g.mode === 'reset'
     ? '<button class="gate-link" type="button" data-click="gateOtherAccount">Switch wallet</button>' : '';
   return '<div class="passcode-screen gate" data-mk="gate-' + g.mode + '" data-click="focusGate">' +
     '<div class="passcode-body">' +
@@ -98,7 +102,7 @@ function sidebarHtml() {
   } else {
     head = '<div class="sb-rail" data-mk="rail">' +
       '<button class="sb-ghost" type="button" title="Expand" data-click="toggleSidebar">' + I.logo + '</button>' +
-      '<button class="sb-round" type="button" title="' + esc(s.filter) + '" data-click="toggleFilter">' + I.lines + '</button>' +
+      '<button class="sb-round" type="button" title="Expand and open filters" aria-label="Expand and open filters" data-click="expandSidebarAndOpenFilters">' + I.lines + '</button>' +
       '<button class="sb-round" type="button" title="New message" data-click="newChat">' + I.composeSm + '</button>' +
     '</div>';
   }
@@ -208,10 +212,15 @@ function settingsHtml() {
           '<div class="set-row__value mono">' + esc(shortAddr(me.ton_address_friendly)) + '</div></div>' +
         I.chevRight +
       '</div>' +
-      '<div class="set-note set-note--account-access">Your account does not expire. On another device, connect the same TON wallet and enter your passcode to restore encrypted chats.</div>' +
-      '<div class="set-row" data-click="goSessions">' +
-        '<div class="set-row__label">Active sessions</div>' + I.chevRight +
-      '</div>' +
+      '<div class="set-note set-note--account-access">Your account does not expire. Connect a new device with a QR code to transfer your encrypted chat keys.</div>' +
+      '<div class="set-h set-h--gap">Devices</div>' +
+      '<button class="set-row set-row--button" type="button" data-click="goConnectDevice">' +
+        '<span class="set-row__copy"><span class="set-row__label">Connect a device</span>' +
+          '<span class="set-row__value">Scan a QR code from your new device</span></span>' + I.chevRight +
+      '</button>' +
+      '<button class="set-row set-row--button" type="button" data-click="goSessions">' +
+        '<span class="set-row__label">Active sessions</span>' + I.chevRight +
+      '</button>' +
 
       '<div class="set-h set-h--gap">Encrypted messages</div>' +
       '<div class="set-row" data-click="goPasscode">' +
@@ -230,9 +239,9 @@ function settingsHtml() {
       '<div class="set-row" data-click="lockNow"><div class="set-row__label">Lock now</div></div>' +
 
       '<div class="set-h set-h--gap">Notifications</div>' +
-      '<div class="set-row" data-click="enableNotifications">' +
-        '<div class="set-row__label">System notifications</div>' +
-        '<div class="set-row__value">' + esc(NOTIFY_LABEL[s.notifyPermission] || 'Not supported') + '</div>' +
+      '<div class="set-row" data-click="toggleNotifications">' +
+        '<div class="set-row__label">All notifications</div>' +
+        '<div class="set-row__value">' + (s.notificationsEnabled ? 'On' : 'Off') + '</div>' +
       '</div>' +
 
       '<div class="set-h set-h--gap">Privacy</div>' +
@@ -390,14 +399,20 @@ function blacklistHtml() {
 
 function sessionsHtml() {
   const s = state;
-  const rows = s.sessions.map((d) =>
-    '<div class="person-row" data-mk="ss' + d.device_id + '">' +
+  const lastDevice = s.sessions.length === 1;
+  const rows = s.sessions.map((d) => {
+    const savedName = d.name || '';
+    const hasGenericName = !savedName || savedName === 'Web browser' || /^(?:Mac|Windows PC|Linux PC) · /.test(savedName);
+    const detected = hasGenericName ? CX.deviceInfo.detect(d.user_agent || '').label : savedName;
+    return '<div class="person-row" data-mk="ss' + d.device_id + '">' +
       '<div class="person-row__grow">' +
-        '<div class="person-row__name">' + esc(d.name) + (d.current ? ' <span class="pill-current">This device</span>' : '') + '</div>' +
+        '<div class="person-row__name">' + esc(detected) + (d.current ? ' <span class="pill-current">This device</span>' : '') + '</div>' +
         '<div class="person-row__handle">Last active ' + esc(relTime(d.last_seen_at)) + ' · ' + esc(d.ip_address || '') + '</div>' +
       '</div>' +
-      (d.current ? '' : '<button class="btn-unblock" type="button" data-id="' + d.device_id + '" data-click="endSession">End session</button>') +
-    '</div>').join('');
+      (d.current && !lastDevice ? '' : '<button class="btn-unblock" type="button" data-id="' + d.device_id + '" data-click="endSession"' +
+        (lastDevice ? ' disabled aria-describedby="last-device-note"' : '') + '>End session</button>') +
+    '</div>';
+  }).join('');
   return '<div class="screen-scroll" data-mk="sessions">' +
     '<div class="screen-head">' +
       '<button class="icon-back" type="button" data-click="closeSessions">' + I.back + '</button>' +
@@ -406,7 +421,8 @@ function sessionsHtml() {
     '<div class="settings-body">' +
       '<div class="set-note">Each device keeps its own refresh token. Ending a session revokes it immediately.</div>' +
       rows +
-      '<div class="set-danger" data-click="logoutAll">Log out of all devices</div>' +
+      (lastDevice ? '<div class="set-note" id="last-device-note">This is your last active device. Connect another device before ending this session or logging out.</div>' : '') +
+      '<div class="set-danger" data-click="logoutAll">Log out of other devices</div>' +
     '</div>' +
   '</div>';
 }
@@ -497,7 +513,8 @@ function statusHtml(m, t) {
   const delivered = t.peerLastDelivered >= m.seq;
   const tick = read ? I.readTick : delivered ? I.tickDelivered : I.tickSent;
   const chain = m.confirmed ? '<span class="msg-chain" title="Anchored in TON">' + I.chain + '</span>' : '';
-  return chain + '<span class="msg-status" title="' + (read ? 'Read' : delivered ? 'Delivered' : 'Sent') + '">' + tick + '</span>';
+  const expiry = m.expiresAt ? '<span class="msg-expiry" title="Disappearing message">' + I.clockSm + '</span>' : '';
+  return chain + '<span class="msg-status" title="' + (read ? 'Read' : delivered ? 'Delivered' : 'Sent') + '">' + expiry + tick + '</span>';
 }
 
 /* Открытый текст сообщения не попадает в DOM: в разметке пузыря лежит только SHA-256
@@ -517,8 +534,18 @@ function hiddenTextHtml(cls, key, text, hash) {
     // hidden, а не только CSS: хеш не должен показаться, даже если cryptis.css взят из старого кэша
     '<span class="bubble__hash" hidden>' + esc(hash || 'encrypting…') + '</span></span>';
 }
-// текст выводится ровно таким, каким его отправили: с переносами строк и всеми символами
-const hashedTextHtml = (m) => hiddenTextHtml('bubble__text', m.id, m.text, m.hash);
+// Текст выводится ровно таким, каким его отправили; длинные сообщения сворачиваются.
+const LONG_MESSAGE_LINES = 40;
+const LONG_MESSAGE_CHARS = 4000;
+const isLongMessage = (m) => m.text.split('\n').length >= LONG_MESSAGE_LINES || m.text.length >= LONG_MESSAGE_CHARS;
+const isEmojiOnly = (text) => {
+  const value = String(text || '');
+  const emojiChars = /[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Component}\p{Regional_Indicator}\uFE0F\u200D\u20E3\uE0020-\uE007E]/gu;
+  return /[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Regional_Indicator}]/u.test(value) && value.replace(emojiChars, '').trim() === '';
+};
+const messageTextHtml = (m) => '<div class="bubble__text md' + (isLongMessage(m) ? ' is-collapsed' : '') + (isEmojiOnly(m.text) ? ' is-emoji-only' : '') + '">' + CX.md.render(m.text) + '</div>';
+const expandMessageHtml = () => '<button class="bubble__expand" type="button" aria-expanded="false" data-click="toggleLongMessage"><span>See more</span>' +
+  '<svg width="20" height="21" viewBox="0 0 20 21" fill="none" xmlns="http://www.w3.org/2000/svg" class="icon-2xs"><path d="M15.2793 7.71101C15.539 7.45131 15.961 7.45131 16.2207 7.71101C16.4804 7.97071 16.4804 8.39272 16.2207 8.65242L10.4707 14.4024C10.211 14.6621 9.78902 14.6621 9.52932 14.4024L3.77932 8.65242L3.69436 8.54792C3.52385 8.28979 3.55205 7.93828 3.77932 7.71101C4.00659 7.48374 4.3581 7.45554 4.61623 7.62605L4.72073 7.71101L10 12.9903L15.2793 7.71101Z" fill="currentColor" stroke="currentColor" stroke-width="0.6"></path></svg></button>';
 
 function flushHiddenText() {
   const css = hiddenRules.join('\n');
@@ -584,51 +611,75 @@ function messagesHtml() {
         ' data-reply-id="' + esc(m.reply.id) + '" data-click="jumpToReply">' +
         '<div class="reply-head">' + I.replyArrow + '<span>' + esc(m.reply.name) + '</span></div>' +
         '<div class="reply-body">' +
-          (m.reply.isFile ? I.doc(17, 'flex-shrink:0;opacity:0.8;') : '') +
+          (m.reply.isFile ? I.fileIcon('', 17) : '') +
           '<span>' + esc(m.reply.text) + '</span>' +
           (m.reply.isFile && m.reply.size ? '<span class="reply-size">(' + esc(m.reply.size) + ')</span>' : '') +
         '</div>' +
       '</div>';
     }
 
+    const reactionAction = !m.pending && !m.failed
+      ? '<button class="msg-icon" type="button" title="React" aria-label="Add reaction" data-id="' + m.id + '" data-click="openReactionPicker">' + (m.file ? I.reactPlus : I.emojiSm) + '</button>'
+      : '';
     const actions = m.file
       ? '<div class="msg-actions msg-actions--file' + (m.mine ? ' is-mine' : '') + (hovered ? ' is-visible' : '') + '">' +
           '<button class="msg-icon" type="button" title="Message actions" aria-label="Message actions" data-id="' + m.id + '" data-click="openMsgMenu">' + I.dotsSm + '</button>' +
           '<button class="msg-icon" type="button" title="Download" data-id="' + m.id + '" data-click="downloadFile">' + I.download + '</button>' +
-          '<button class="msg-icon" type="button" title="React" data-click="react">' + I.reactPlus + '</button>' +
+          reactionAction +
         '</div>'
       : '<div class="msg-actions' + (m.mine ? ' is-mine' : '') + (hovered ? ' is-visible' : '') + '">' +
           '<button class="msg-icon" type="button" title="Message actions" aria-label="Message actions" data-id="' + m.id + '" data-click="openMsgMenu">' + I.dotsSm + '</button>' +
-          '<button class="msg-icon" type="button" data-click="react">' + I.emojiSm + '</button>' +
+          reactionAction +
         '</div>';
 
     const meta = '<span class="bubble__meta"' + (showMeta ? '' : ' style="display:none;"') + '>' +
-      (m.expiresAt ? '<span title="Disappearing">' + I.clockSm + '</span>' : '') +
+      (m.expiresAt && !m.mine ? '<span title="Disappearing">' + I.clockSm + '</span>' : '') +
       '<span>' + esc(m.meta) + '</span>' + (m.mine ? statusHtml(m, t) : '') +
     '</span>';
 
     let content;
     if (m.file) {
-      content = '<div class="file-card' + (m.pending ? ' is-pending' : '') + '" title="Tap to download" data-id="' + m.id + '" data-click="downloadFile">' +
-        I.doc(20, 'flex-shrink:0;opacity:0.75;') +
-        '<div class="file-card__body">' +
-          '<div class="file-card__name"><span>' + esc(m.file.base) + '</span><span>' + esc(m.file.ext) + '</span></div>' +
-          '<div class="file-card__sub"><span>' + (m.pending ? 'Encrypting…' : 'Tap to download') + '</span><span>·</span><span>' + esc(m.file.size) + '</span>' +
-            (m.mine ? '<span class="file-card__status">' + statusHtml(m, t) + '</span>' : '') + '</div>' +
-        '</div>' +
-      '</div>';
+      const isImage = !m.pending && !!m.file.key && /^image\//i.test(m.file.mime || '');
+      const preview = isImage ? getImagePreview(m.id) : null;
+      if (isImage && !(preview && preview.error)) {
+        const imageMeta = '<span class="image-attachment__meta">' +
+          (m.expiresAt && !m.mine ? I.clockSm : '') + '<span>' + esc(m.meta) + '</span>' +
+          (m.mine ? statusHtml(m, t) : '') + '</span>';
+        content = preview
+          ? '<div class="image-attachment" data-mk="image' + m.id + '">' +
+              '<img class="chat-image" loading="lazy" decoding="async" alt="' + esc(m.file.base + m.file.ext) + '"' +
+                ' src="' + esc(preview.url) + '" width="' + preview.width + '" height="' + preview.height + '">' + imageMeta +
+            '</div>'
+          : '<div class="chat-image-placeholder" data-mk="image' + m.id + '" data-image-id="' + esc(m.id) + '"' +
+              ' role="img" aria-label="Loading ' + esc(m.file.base + m.file.ext) + '"></div>';
+      } else {
+        content = '<div class="file-card' + (m.pending ? ' is-pending' : '') + '" title="Tap to download" data-id="' + m.id + '" data-click="downloadFile">' +
+          I.fileIcon(m.file.ext, 20) +
+          '<div class="file-card__body">' +
+            '<div class="file-card__name"><span>' + esc(m.file.base) + '</span><span>' + esc(m.file.ext) + '</span></div>' +
+            '<div class="file-card__sub"><span>' + (m.pending ? 'Encrypting…' : 'Tap to download') + '</span><span>·</span><span>' + esc(m.file.size) + '</span>' +
+              (m.mine ? '<span class="file-card__status">' + statusHtml(m, t) + '</span>' : '') + '</div>' +
+          '</div>' +
+        '</div>';
+      }
     } else if (m.bad) {
       content = '<div class="bubble is-bad">' + I.warn + '<span class="bubble__text">' + esc(m.text) + '</span>' + meta + '</div>';
     } else {
-      content = '<div class="bubble' + (m.mine ? ' is-mine' : '') + (m.pending ? ' is-pending' : '') + '">' +
+      const longText = !m.bad && isLongMessage(m);
+      content = '<div class="bubble' + (m.mine ? ' is-mine' : '') + (m.pending ? ' is-pending' : '') + (longText ? ' has-long-text' : '') + '">' +
         (m.forwarded ? '<div class="bubble__fwd">Forwarded</div>' : '') +
-        hashedTextHtml(m) +
-        meta +
+        (m.bad ? '<span class="bubble__text">' + esc(m.text) + '</span>' : messageTextHtml(m)) +
+        (longText ? '<div class="bubble__footer">' + expandMessageHtml() + meta + '</div>' : meta) +
       '</div>';
     }
 
-    out += '<div class="msg-row' + (m.mine ? ' is-mine' : '') + '" data-mk="m' + m.id + '" data-msg-id="' + m.id + '"' +
-      ' data-mouseenter="hoverMsg" data-mouseleave="unhoverMsg">' + authorAv + actions + content + '</div>';
+    const reactions = m.reactions && m.reactions.length
+      ? '<div class="msg-reactions" data-mk="reactions' + m.id + '">' + m.reactions.map((r) =>
+          '<span class="msg-reaction' + (r.mine ? ' is-mine' : '') + '">' + esc(r.emoji) +
+          (r.count > 1 ? '<span class="msg-reaction__count">' + esc(r.count) + '</span>' : '') + '</span>').join('') + '</div>' : '';
+    out += '<div class="msg-row' + (m.mine ? ' is-mine' : '') + (m.reactions && m.reactions.length ? ' has-reactions' : '') + '" data-mk="m' + m.id + '" data-msg-id="' + m.id + '"' +
+      ' data-mouseenter="hoverMsg" data-mouseleave="unhoverMsg">' + authorAv + actions +
+      '<div class="msg-body" data-mk="msgbody' + m.id + '">' + content + reactions + '</div></div>';
 
     return out;
   }).join('');
@@ -662,7 +713,7 @@ function composerHtml() {
         s.attachments.map((a) =>
           '<div class="attach" data-mk="at' + a.id + '">' +
             '<div class="attach__card">' +
-              I.doc(20, 'flex-shrink:0;color:#5b7083;') +
+              I.fileIcon(a.ext, 20) +
               '<div class="attach__body">' +
                 '<div class="attach__name"><span>' + esc(a.base) + '</span><span>' + esc(a.ext) + '</span></div>' +
                 '<div class="attach__sub"><span>Document</span><span>·</span><span>' + esc(a.size) + '</span></div>' +
@@ -682,7 +733,7 @@ function composerHtml() {
 
   return '<div class="composer' + (sidebarExpanded() ? '' : ' is-rail') + '" data-mk="composer">' +
     '<button class="comp-btn comp-attach" type="button" title="Add attachment" data-click="pickFiles">' + I.plus + '</button>' +
-    '<button class="comp-btn comp-emoji" type="button" title="Emoji" data-click="noop">' + I.emoji + '</button>' +
+    '<button class="comp-btn comp-emoji" type="button" title="Emoji" aria-label="Choose emoji" data-click="openEmojiPicker">' + I.emoji + '</button>' +
     '<div class="comp-field">' +
       preview +
       attachments +
@@ -732,7 +783,7 @@ function chatHtml() {
     ? '<div class="chat-older" data-mk="older">' + (s.loadingOlder ? 'Loading…' : 'Scroll up for older messages') + '</div>' : '';
   const sub = chatSubtitle(peer);
 
-  return '<div class="chat" data-mk="chat">' +
+  return '<div class="chat' + (s.fileDropActive ? ' is-drop-active' : '') + '" data-mk="chat">' +
     '<div class="chat-head">' +
       '<div class="chat-head__blur"></div>' +
       '<button class="chat-head__back" type="button" title="Back" data-click="backToList">' + I.back + '</button>' +
@@ -758,6 +809,10 @@ function chatHtml() {
     msgMenuHtml() +
     replyDraft +
     composerHtml() +
+    '<div class="chat-drop-overlay" data-mk="chat-drop-overlay" aria-hidden="true">' +
+      '<div class="chat-drop-overlay__card"><span class="chat-drop-overlay__icon">' + I.plus + '</span>' +
+        '<span>Drop to attach</span></div>' +
+    '</div>' +
   '</div>';
 }
 
@@ -772,6 +827,7 @@ function emptyChatHtml() {
 
 function mainHtml() {
   const s = state;
+  if (s.view === 'pairing-approve') return pairingApprovalHtml();
   if (s.view === 'settings') return settingsHtml();
   if (s.view === 'autolock') return autolockHtml();
   if (s.view === 'groupperm') return groupPermHtml();
@@ -1021,12 +1077,6 @@ function profileDetailsHtml() {
           '<div class="paction__circle">' + I.searchDark + '</div>' +
           '<div class="paction__label">Search</div>' +
         '</div>' +
-        // общие настройки приложения — быстрый переход из личного чата
-        (peer.isGroup ? '' :
-          '<div class="paction" data-mk="psettings" data-click="settingsFromProfile">' +
-            '<div class="paction__circle">' + I.gear + '</div>' +
-            '<div class="paction__label">Settings</div>' +
-          '</div>') +
         '<div class="paction" data-click="toggleMore">' +
           '<div class="paction__circle' + (s.moreOpen ? ' is-open' : '') + '">' + I.dotsBig + '</div>' +
           '<div class="paction__label">More</div>' +
@@ -1056,7 +1106,7 @@ function profileDisappearingHtml() {
     '</div>' +
     '<div style="flex:1;min-height:0;overflow-y:auto;padding:14px 22px 8px;">' +
       '<div class="vanish-note">' + I.clock +
-        '<div class="vanish-note__text">After messages in this chat get read, they will vanish after the selected time below.</div>' +
+        '<div class="vanish-note__text">New messages in this chat will be deleted after the selected time. The timer starts when each message is sent.</div>' +
       '</div>' +
       '<div class="vanish-list">' +
         Object.keys(LABELS.vanish).map((label) =>
@@ -1162,8 +1212,121 @@ function overlaysHtml() {
   if (s.infoOpen) out += infoSheetHtml();
   if (s.profileOpen) out += profileHtml();
   if (s.notice && !s.gate) out += noticeHtml();
+  if (s.emojiPicker) out += emojiPickerHtml();
   if (s.toast) {  // последним в слое окон и с наибольшим z-index — поверх любых модалок
     out += '<div class="toast' + (s.toastVisible ? ' is-visible' : '') + '" data-mk="toast">' + esc(s.toast) + '</div>';
   }
   return out;
+}
+
+function emojiPickerHtml() {
+  const s = state;
+  const query = (s.emojiQuery || '').trim().toLowerCase();
+  const groups = query
+    ? EMOJI_GROUPS.map(([name, items]) => [name, items.filter(([emoji, words]) =>
+        emoji.includes(query) || words.toLowerCase().includes(query))]).filter(([, items]) => items.length)
+    : EMOJI_GROUPS.filter(([name]) => name === s.emojiCategory);
+  const pickerRows = groups.map(([name, items]) => '<section class="emoji-picker__group" data-mk="epg' + name.replace(/[^a-z]/gi, '') + '">' +
+    '<div class="emoji-picker__heading">' + esc(name) + '</div><div class="emoji-picker__grid">' +
+    items.map(([emoji, words]) => '<button class="emoji-picker__item" type="button" title="' + esc(words) + '" aria-label="' + esc(words) + '" data-emoji="' + esc(emoji) + '" data-click="pickEmoji">' + emoji + '</button>').join('') +
+    '</div></section>').join('');
+  const pos = s.emojiPos || { top: 80, left: 16 };
+  return '<div class="emoji-picker-layer" data-mk="emoji-layer" data-click="closeEmojiPicker">' +
+    '<div class="emoji-picker" style="top:' + pos.top + 'px;left:' + pos.left + 'px" data-click="stop">' +
+      '<div class="emoji-picker__search"><span><svg class="emoji-picker__search-icon" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M10.25 3.75c-3.59 0-6.5 2.91-6.5 6.5s2.91 6.5 6.5 6.5c1.795 0 3.419-.726 4.596-1.904 1.178-1.177 1.904-2.801 1.904-4.596 0-3.59-2.91-6.5-6.5-6.5zm-8.5 6.5c0-4.694 3.806-8.5 8.5-8.5s8.5 3.806 8.5 8.5c0 1.986-.682 3.815-1.824 5.262l4.781 4.781-1.414 1.414-4.781-4.781c-1.447 1.142-3.276 1.824-5.262 1.824-4.694 0-8.5-3.806-8.5-8.5z"></path></svg></span>' +
+        '<input id="emoji-search" type="text" value="' + esc(s.emojiQuery) + '" placeholder="Search emoji" autocomplete="off" data-mk="emoji-search" data-input="onEmojiQuery">' +
+      '</div>' +
+      (!query ? '<nav class="emoji-picker__categories" aria-label="Emoji categories">' + EMOJI_GROUPS.map(([name, items]) =>
+        '<button type="button" class="emoji-picker__category' + (name === s.emojiCategory ? ' is-active' : '') + '" title="' + esc(name) + '" aria-label="' + esc(name) + '" data-category="' + esc(name) + '" data-click="pickEmojiCategory">' + esc(EMOJI_CATEGORY_ICONS[name]) + '</button>').join('') + '</nav>' : '') +
+      '<div class="emoji-picker__scroll' + (pickerRows ? '' : ' is-empty') + '" data-mk="emoji-scroll">' +
+        (pickerRows || '<h2 class="emoji-picker__empty">No results found</h2>') + '</div>' +
+    '</div></div>';
+}
+
+function pairingGateHtml(g) {
+  const messages = {
+    creating: 'Creating a secure QR…', pending: 'Waiting for approval on your connected device.',
+    expired: 'This QR has expired.', rejected: 'This request was rejected.', cancelled: 'This request was cancelled.',
+    error: 'Could not connect this device.', completing: 'Saving your device session…',
+    'complete-error': 'Connection needs another attempt.',
+  };
+  const limit = Number(g.generation_limit) || 3;
+  const remaining = Math.max(0, Number(g.generation_remaining ?? limit));
+  const retrySeconds = Math.max(0, Math.ceil(((Number(g.generation_retry_at) || 0) - Date.now()) / 1000));
+  const rateLimited = typeof g.error === 'string' && g.error.startsWith('Too many QR requests.');
+  const errorText = rateLimited
+    ? (retrySeconds ? 'Too many QR requests. Try again in ' + retrySeconds + ' seconds.' : '')
+    : (g.error || '');
+  const canGenerate = !['creating', 'completing'].includes(g.status) && !retrySeconds;
+  const quotaNote = g.status === 'creating'
+    ? 'Limit: ' + limit + ' QR codes every 20 minutes.'
+    : remaining + ' of ' + limit + ' QR generations remaining in this 20-minute window.' +
+    (retrySeconds ? ' Try again in ' + retrySeconds + ' seconds.' : '');
+  return '<div class="passcode-screen gate pairing-screen" data-mk="gate-pairing">' +
+    '<section class="pairing-card" aria-labelledby="pairing-title">' +
+      '<div class="pairing-card__primary">' +
+        '<h1 class="pairing-card__title" id="pairing-title">Connect with QR</h1>' +
+        '<p class="pairing-card__instructions">On the device already connected to your account, open Settings → Devices → Connect a device. Scan this QR or paste its code, then choose Allow.</p>' +
+        '<div class="pairing-card__status" role="status">' + esc(messages[g.status] || messages.error) + '</div>' +
+        (g.qr ? '<div class="pairing-card__qr" id="pairing-qr">' + g.qr + '</div>' :
+          '<div class="pairing-card__qr pairing-card__qr--empty" aria-hidden="true">' +
+            (g.status === 'creating' ? '<span class="gate-spinner"></span>' : '<span>QR code will appear here</span>') + '</div>') +
+        (g.expires_at ? '<div class="pairing-card__expiry">Expires at ' + esc(new Date(g.expires_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) + '</div>' : '') +
+        '<div class="pairing-card__error" role="alert">' + esc(errorText) + '</div>' +
+        '<div class="pairing-card__actions">' +
+          '<button class="btn-dark pairing-card__generate" type="button" data-click="' + (g.status === 'complete-error' ? 'retryPairingComplete' : 'beginPairing') + '"' +
+            (!canGenerate ? ' disabled' : '') + '>' + (g.status === 'creating' ? 'Generating QR…' : g.status === 'complete-error' ? 'Retry connection' : g.qr ? 'Generate a new QR' : 'Generate QR') + '</button>' +
+          '<p class="pairing-card__quota">' + esc(quotaNote) + '</p>' +
+          (g.status !== 'completing' ? '<button class="gate-link pairing-card__cancel" type="button" data-click="cancelPairing">Cancel</button>' : '') +
+        '</div>' +
+      '</div>' +
+      '<aside class="pairing-card__manual">' +
+        '<div class="pairing-card__manual-heading">Manual pairing code</div>' +
+        '<div class="pairing-card__manual-body">' +
+          '<div class="pairing-card__code' + (g.code ? '' : ' is-empty') + '" tabindex="0">' + esc(g.code || 'Your code will appear here after the QR is generated.') + '</div>' +
+          '<button class="pairing-card__copy" type="button" data-click="copyPairingCode" aria-label="Copy pairing code" title="Copy code"' +
+            (!g.code ? ' disabled' : '') + '>' + I.copy + '</button>' +
+        '</div>' +
+      '</aside>' +
+    '</section>' +
+  '</div>';
+}
+
+function pairingApprovalHtml() {
+  const p = state.pairingApproval || { status: 'scan' };
+  let content;
+  if (p.status === 'scan') {
+    content = '<p class="set-note">Enter the code shown on your new device. You will review the device before allowing access.</p>' +
+      '<label class="pairing-code-label" for="pairing-scan-code">Pairing code</label>' +
+      '<textarea id="pairing-scan-code" class="pairing-code" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste the pairing code here"></textarea>' +
+      '<button class="btn-dark" type="button" data-click="inspectPairing">Continue</button>';
+  } else if (p.status === 'confirm') {
+    content = '<h2>Connect ' + esc(p.device_name) + '?</h2>' +
+      '<p class="set-note">Allow this device to access your account and decrypt your chats. Only approve a QR displayed on a device you control.</p>' +
+      '<p class="set-note">Expires at ' + esc(new Date(p.expires_at * 1000).toLocaleTimeString()) + '</p>' +
+      (!VAULT.isUnlocked() ? '<label for="pairing-unlock-pin">Current device passcode</label><input id="pairing-unlock-pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off">' : '') +
+      '<div class="pairing-actions"><button class="btn-dark" type="button" data-click="allowPairing">Allow</button>' +
+      '<button class="btn-cancel" type="button" data-click="rejectPairing">Reject</button></div>';
+  } else {
+    content = '<p class="set-note pairing-result' + (p.status === 'approved' ? ' is-success' : ' is-error') + '" role="status">' + (p.status === 'approved' ? 'Device approved. Enter the passcode from this device on the new device to finish connecting.' : 'Request rejected.') + '</p>' +
+      '<button class="btn-dark pairing-connect-another" type="button" data-click="goConnectDevice">Connect another device</button>';
+  }
+  return '<div class="screen-scroll" data-mk="pairing-approval"><div class="screen-head pairing-device-head">' +
+    '<button class="icon-back" type="button" data-click="closeConnectDevice" aria-label="Back">' + I.back + '</button>' +
+    '<div class="screen-title">Connect a device</div>' +
+    (p.status === 'scan' ? '<button class="btn-dark pairing-scan-start" type="button" data-click="startPairingCamera"><span class="pairing-scan-start__icon">' + I.camera + '</span><span>Scan QR code</span></button>' : '') +
+    '</div>' +
+    '<div class="settings-body pairing-settings-page"><section class="pairing-settings-inline">' +
+      '<div class="pairing-settings-inline__content">' + content + '</div>' +
+    '</section></div>' +
+    '<div class="pairing-scanner" data-mk="pairing-scanner"' + (pairingScanning ? '' : ' hidden') + '>' +
+      '<div class="pairing-scanner__top"><h1>Scan QR code</h1></div>' +
+      '<p class="pairing-scanner__instructions">Point your camera at the QR code on the device you want to connect.</p>' +
+      '<div class="pairing-scanner__frame-wrap"><video id="pairing-camera" data-mk="pairing-camera" playsinline muted></video><div class="pairing-scanner__frame" aria-hidden="true"></div></div>' +
+      '<p class="pairing-scanner__hint" role="status">' + esc(pairingCameraError || 'Align the QR code inside the frame') + '</p>' +
+      '<div class="pairing-scanner__actions">' +
+        '<button class="pairing-scanner__retry" type="button" data-click="startPairingCamera"' + (pairingCameraError ? '' : ' hidden') + '>Try again</button>' +
+        '<button class="pairing-scanner__cancel" type="button" data-click="stopPairingScan">Cancel</button>' +
+      '</div>' +
+    '</div></div>';
 }

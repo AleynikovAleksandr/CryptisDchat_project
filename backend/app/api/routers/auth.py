@@ -1,7 +1,7 @@
 """10.1 Аутентификация и сессия + 10.10 Кошелёк."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Header, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser, auth_rate_limit, client_ip, current_user, get_infra, get_session
@@ -14,8 +14,12 @@ from app.schemas.auth import (
     TonProofVerifyIn,
     WalletDisconnectIn,
 )
+from app.schemas.device_pairing import (
+    PairingApproveIn, PairingCompleteIn, PairingCreateIn, PairingID, PairingScanIn,
+)
 from app.schemas.users import MeOut
 from app.services.auth_service import AuthService
+from app.services.device_pairing_service import DevicePairingService
 from app.services.errors import NotFound
 from app.services.infra import Infra
 
@@ -62,7 +66,7 @@ async def logout(cu: CurrentUser = Depends(current_user), session: AsyncSession 
 @router.post("/auth/logout-all", status_code=204)
 async def logout_all(cu: CurrentUser = Depends(current_user), session: AsyncSession = Depends(get_session),
                      infra: Infra = Depends(get_infra)):
-    await AuthService(session, infra).logout_all(cu.user)
+    await AuthService(session, infra).logout_all(cu.user, cu.device_id)
 
 
 @router.get("/auth/sessions", response_model=list[SessionOut])
@@ -95,3 +99,78 @@ async def wallet_disconnect(body: WalletDisconnectIn, cu: CurrentUser = Depends(
     svc = AuthService(session, infra)
     await svc.unlink_wallet(cu.user, body.address)
     return await svc.me(cu.user)
+
+
+@router.post("/auth/pairings", status_code=201)
+async def pairing_create(body: PairingCreateIn, request: Request, response: Response,
+                         session: AsyncSession = Depends(get_session), infra: Infra = Depends(get_infra)):
+    response.headers['Cache-Control'] = 'no-store'
+    svc = DevicePairingService(session, infra)
+    return await svc.create(body, client_ip(request))
+
+
+@router.get("/auth/pairings/{request_id}")
+async def pairing_poll(request_id: PairingID, request: Request, response: Response,
+                       x_pairing_secret: str | None = Header(default=None),
+                       session: AsyncSession = Depends(get_session), infra: Infra = Depends(get_infra)):
+    response.headers['Cache-Control'] = 'no-store'
+    svc = DevicePairingService(session, infra)
+    await svc.limit(client_ip(request), 'poll', 120)
+    return await svc.poll(request_id, x_pairing_secret)
+
+
+@router.post("/auth/pairings/{request_id}/inspect")
+async def pairing_inspect(request_id: PairingID, body: PairingScanIn,
+                          cu: CurrentUser = Depends(current_user),
+                          session: AsyncSession = Depends(get_session), infra: Infra = Depends(get_infra)):
+    svc = DevicePairingService(session, infra)
+    await svc.limit(cu.user.id, 'review', 30)
+    return await svc.inspect(request_id, body, cu.user)
+
+
+@router.post("/auth/pairings/{request_id}/approve")
+async def pairing_approve(request_id: PairingID, body: PairingApproveIn,
+                          cu: CurrentUser = Depends(current_user),
+                          session: AsyncSession = Depends(get_session), infra: Infra = Depends(get_infra)):
+    svc = DevicePairingService(session, infra)
+    await svc.limit(cu.user.id, 'review', 30)
+    return await svc.approve(request_id, body, cu.user)
+
+
+@router.post("/auth/pairings/{request_id}/reject")
+async def pairing_reject(request_id: PairingID, body: PairingScanIn,
+                         cu: CurrentUser = Depends(current_user),
+                         session: AsyncSession = Depends(get_session), infra: Infra = Depends(get_infra)):
+    svc = DevicePairingService(session, infra)
+    await svc.limit(cu.user.id, 'review', 30)
+    return await svc.reject(request_id, body, cu.user)
+
+
+@router.delete("/auth/pairings/{request_id}", status_code=204, dependencies=[Depends(auth_rate_limit)])
+async def pairing_cancel(request_id: PairingID, request: Request,
+                         x_pairing_secret: str | None = Header(default=None),
+                         session: AsyncSession = Depends(get_session), infra: Infra = Depends(get_infra)):
+    svc = DevicePairingService(session, infra)
+    await svc.limit(client_ip(request), 'cancel', 30)
+    await svc.cancel(request_id, x_pairing_secret)
+
+
+@router.post("/auth/pairings/{request_id}/complete", response_model=TokenPairOut,
+             dependencies=[Depends(auth_rate_limit)])
+async def pairing_complete(request_id: PairingID, body: PairingCompleteIn, request: Request, response: Response,
+                           x_pairing_secret: str | None = Header(default=None),
+                           session: AsyncSession = Depends(get_session), infra: Infra = Depends(get_infra)):
+    response.headers['Cache-Control'] = 'no-store'
+    svc = DevicePairingService(session, infra)
+    await svc.limit(client_ip(request), 'complete', 30)
+    issued = await svc.complete(request_id, x_pairing_secret, body.operation_id,
+                                request.headers.get('user-agent', ''), client_ip(request))
+    response.set_cookie(
+        DEVICE_COOKIE, issued.device_key, max_age=infra.settings.device_cookie_max_age_days * 24 * 3600,
+        path=DEVICE_COOKIE_PATH, httponly=True, samesite='strict', secure=not infra.settings.is_dev,
+    )
+    return TokenPairOut(
+        access_token=issued.access_token, access_expires_at=issued.access_expires_at,
+        refresh_token=issued.refresh_token, is_new_user=False,
+        user=await AuthService(session, infra).me(issued.user),
+    )

@@ -1,10 +1,16 @@
 """Вход через TON-кошелёк и сессии (ТЗ 4, 4.2)."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import random
+import uuid
+
+import jwt
 from dataclasses import dataclass
 from datetime import timedelta
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interfaces.ton_proof import TonProofRequest, VerifiedWallet
@@ -13,7 +19,7 @@ from app.repositories import KeyRepository, UserRepository
 from app.schemas.auth import ChallengeOut, SessionOut, TonProofVerifyIn
 from app.schemas.users import MeOut
 from app.services import security
-from app.services.errors import Conflict, Forbidden, Unauthorized
+from app.services.errors import Conflict, Forbidden, NotFound, Unauthorized
 from app.services.infra import Infra
 from app.services.presenters import me_out
 from app.services.ton_proof import TonProofError, make_payload
@@ -132,6 +138,47 @@ class AuthService:
         return IssuedSession(user=user, access_token=access, access_expires_at=access_exp,
                              refresh_token=refresh, is_new_user=False, device_key=new_key)
 
+    async def prepare_pairing_session(self, user: User, request_id: str, operation_id: str,
+                                      poll_secret: str, issued_at_ms: int, device_name: str,
+                                      user_agent: str, ip: str) -> IssuedSession:
+        """Prepare one deterministic issuance; the pairing service owns the commit.
+
+        A short-lived receipt can replay the exact credentials without storing
+        bearer secrets. A rotated/revoked session can never be resurrected here.
+        The caller holds the account's session-mutation lock.
+        """
+        def derive(purpose: str) -> str:
+            message = f'pairing-v1:{purpose}:{user.id}:{request_id}:{operation_id}:{poll_secret}'
+            return hmac.new(self.infra.settings.jwt_secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+        device_key = derive('device')
+        refresh = str(uuid.UUID(derive('refresh')[:32], version=4))
+        device = await self.s.scalar(select(Device).where(Device.id == request_id).with_for_update())
+        if device is None:
+            device = Device(id=request_id, user_id=user.id, name=device_name,
+                            user_agent=user_agent[:255], ip_address=ip[:45],
+                            client_key_hash=security.hash_device_key(device_key))
+            self.s.add(device)
+            await self.s.flush()
+            await self.users.add_refresh_token(
+                user.id, device.id, security.hash_refresh_token(refresh),
+                utcnow() + timedelta(days=self.infra.settings.refresh_token_ttl_days),
+            )
+        else:
+            token = await self.users.refresh_by_hash(security.hash_refresh_token(refresh))
+            if (device.user_id != user.id or device.revoked_at is not None
+                    or device.tokens_revoked_at is not None
+                    or device.client_key_hash != security.hash_device_key(device_key)
+                    or token is None or token.revoked_at is not None or token.expires_at <= utcnow()):
+                raise Conflict('pairing session already changed', code='pairing_used')
+        expires = issued_at_ms // 1000 + self.infra.settings.access_token_ttl_seconds
+        access = jwt.encode({
+            'sub': user.id, 'did': device.id, 'iat': issued_at_ms // 1000,
+            'iat_ms': issued_at_ms, 'exp': expires, 'jti': derive('access-id'), 'typ': 'access',
+        }, self.infra.settings.jwt_secret, algorithm=self.infra.settings.jwt_algorithm)
+        return IssuedSession(user=user, access_token=access, access_expires_at=expires,
+                             refresh_token=refresh, is_new_user=False, device_key=device_key)
+
     async def _device_for_login(self, user: User, device_name: str, user_agent: str, ip: str,
                                 device_key: str | None) -> Device:
         """Один браузер — одно устройство: повторный вход с cookie устройства переиспользует запись.
@@ -207,15 +254,24 @@ class AuthService:
             raise Unauthorized("session revoked", code="token_revoked")
         return user, claims.device_id
 
-    async def logout(self, user: User, device_id: str) -> None:
+    async def logout(self, user: User, device_id: str, preserve_last: bool = True) -> None:
+        devices = await self.users.active_devices(user.id, for_update=True)
+        if device_id not in {d.id for d in devices}:
+            raise NotFound("session not found")
+        if preserve_last and len(devices) <= 1:
+            raise Conflict("This is your last active device. Connect another device before logging out.", code="last_device")
         await self.users.revoke_device(device_id)
         await self.s.commit()
         await self.infra.bus.publish(user.id, "session.revoked", {"device_id": device_id})
 
-    async def logout_all(self, user: User) -> None:
-        await self.users.revoke_all(user.id)
+    async def logout_all(self, user: User, current_device_id: str) -> None:
+        devices = await self.users.active_devices(user.id, for_update=True)
+        if current_device_id not in {d.id for d in devices}:
+            raise Unauthorized("session revoked", code="token_revoked")
+        device_ids = await self.users.revoke_all_except(user.id, current_device_id)
         await self.s.commit()
-        await self.infra.bus.publish(user.id, "session.revoked", {"device_id": "*"})
+        for device_id in device_ids:
+            await self.infra.bus.publish(user.id, "session.revoked", {"device_id": device_id})
 
     async def sessions(self, user: User, current_device: str) -> list[SessionOut]:
         return [

@@ -1,7 +1,7 @@
 """Конфигурация приложения.
 
 Все параметры читаются из переменных окружения (файл .env в docker-compose).
-Один и тот же модуль используется FastAPI, Flask-админкой и Celery-воркером,
+Один и тот же модуль используется FastAPI и Celery-воркером,
 чтобы у всех процессов был единый источник настроек.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     db_user: str = "cryptis_user"
     db_password: str = ""
     database_url: str | None = None          # явный URL перекрывает поля выше (тесты: sqlite+aiosqlite)
-    sync_database_url: str | None = None     # для Flask и Celery (pymysql)
+    sync_database_url: str | None = None     # для Celery (pymysql)
     # соединения каждого воркера к ProxySQL: они дешёвые, к MariaDB уходит не больше
     # mysql_servers.max_connections (proxysql/proxysql.cnf.template)
     db_pool_size: int = 20
@@ -87,12 +87,7 @@ class Settings(BaseSettings):
     rate_limit_default: str = "120/60"        # запросов / секунд
     rate_limit_auth: str = "20/60"
 
-    # --- Flask-админка ---
-    admin_secret_key: str = "change-me-admin"
-    admin_username: str = "admin"
-    admin_password: str = ""
-    admin_password_hash: str = ""             # хеш werkzeug вместо пароля открытым текстом; важнее ADMIN_PASSWORD
-    admin_allowed_ips: str = ""               # пусто = без ограничения по IP
+    # --- подписанные вебхуки ---
     webhook_secret: str = "change-me-webhook"
 
     # ------------------------------------------------------------------
@@ -100,7 +95,7 @@ class Settings(BaseSettings):
         """В production запрещаем запуск с секретами по умолчанию и dev-входом."""
         if self.is_dev:
             return
-        weak = [name for name in ("jwt_secret", "ton_proof_secret", "admin_secret_key", "webhook_secret")
+        weak = [name for name in ("jwt_secret", "ton_proof_secret", "webhook_secret")
                 if getattr(self, name).startswith("change-me") or len(getattr(self, name)) < 32]
         if weak:
             raise RuntimeError(f"set strong values (32+ chars) for: {', '.join(n.upper() for n in weak)}")

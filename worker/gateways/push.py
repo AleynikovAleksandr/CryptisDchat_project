@@ -9,10 +9,11 @@ from __future__ import annotations
 import json
 import logging
 
-import httpx
+from cryptography.hazmat.primitives import serialization
+from pywebpush import WebPushException, webpush
 
 from app.interfaces.push import IPushSender, PushMessage
-from app.services import webpush
+from app.services import webpush as webpush_service
 
 log = logging.getLogger("cryptis.push")
 
@@ -26,35 +27,47 @@ class LogPushSender(IPushSender):
 
 
 class WebPushSender(IPushSender):
-    def __init__(self, vapid_private_key: str, subject: str, fallback: IPushSender,
-                 client: httpx.Client | None = None) -> None:
-        webpush.load_vapid_key(vapid_private_key)  # неверный ключ — ошибка сразу, а не на первом push
+    def __init__(self, vapid_private_key: str, subject: str, fallback: IPushSender) -> None:
+        # Ключ хранится в прежнем формате base64url (32-байтовый скаляр P-256).
+        # pywebpush принимает PEM, поэтому конвертируем его один раз при создании sender.
+        private_key = webpush_service.load_vapid_key(vapid_private_key)
+        self.pem_key = private_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode("ascii")
         self.key = vapid_private_key
         self.subject = subject
         self.fallback = fallback
-        self.client = client or httpx.Client(timeout=10, follow_redirects=False)
 
     def send(self, message: PushMessage) -> bool:
         if message.platform != "webpush":
             return self.fallback.send(message)
         try:
-            sub = webpush.parse_subscription(message.token)
+            sub = webpush_service.parse_subscription(message.token)
         except ValueError:
             return False  # подписка негодная — токен удалится
         payload = json.dumps({"title": message.title, "body": message.body, **message.data},
                              separators=(",", ":"), ensure_ascii=False).encode()
-        headers = {
-            "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream",
-            "TTL": str(PUSH_TTL_SECONDS), "Urgency": "high",
-            **webpush.vapid_headers(sub.endpoint, self.key, self.subject),
-        }
         try:
-            r = self.client.post(sub.endpoint, content=webpush.encrypt(sub, payload), headers=headers)
-        except httpx.HTTPError as e:
+            webpush(
+                subscription_info={
+                    "endpoint": sub.endpoint,
+                    "keys": {"p256dh": webpush_service.b64u(sub.p256dh), "auth": webpush_service.b64u(sub.auth)},
+                },
+                data=payload.decode("utf-8"),
+                vapid_private_key=self.pem_key,
+                vapid_claims={"sub": self.subject},
+                ttl=PUSH_TTL_SECONDS,
+                timeout=10,
+                headers={"Urgency": "high"},
+            )
+        except WebPushException as e:
+            response = getattr(e, "response", None)
+            if response is not None and response.status_code in (404, 410):
+                return False  # подписка отозвана браузером
             log.warning("web push to %s failed: %s", sub.endpoint[:60], e)
             return True  # сеть — не повод удалять подписку
-        if r.status_code in (404, 410):  # подписка отозвана браузером
-            return False
-        if r.status_code >= 400:
-            log.warning("web push to %s rejected: %s %s", sub.endpoint[:60], r.status_code, r.text[:200])
+        except Exception as e:
+            log.warning("web push to %s failed: %s", sub.endpoint[:60], e)
         return True

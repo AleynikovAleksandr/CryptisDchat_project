@@ -25,7 +25,6 @@ os.environ.update({
     "RATE_LIMIT_AUTH": "10000/60",
     "CHAIN_BATCH_MAX_ITEMS": "500",
     "WEBHOOK_SECRET": "hook-secret",
-    "ADMIN_SECRET_KEY": "admin-secret",
 })
 
 import hashlib  # noqa: E402

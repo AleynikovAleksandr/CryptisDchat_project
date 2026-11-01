@@ -108,7 +108,7 @@ def submit_batch(self, batch_id: str) -> None:
             batch.attempts += 1
             batch.last_error = str(exc)[:2000]
             if self.request.retries >= MAX_RETRIES:
-                batch.status = "failed"  # виден в /admin/blockchain-queue, повтор — вручную
+                batch.status = "failed"  # после исчерпания автоматических повторов
                 session.commit()
                 log.error("batch %s failed permanently: %s", batch_id, exc)
                 return
@@ -182,7 +182,7 @@ def recheck_submitted() -> int:
 
 @celery_app.task(name="blockchain.retry_batch")
 def retry_batch(batch_id: str) -> None:
-    """Ручной повтор из админ-панели (/admin/blockchain-queue/retry/<batch_id>)."""
+    """Повтор неудачного батча по команде оператора."""
     with db() as session:
         batch = session.get(ChainBatch, batch_id)
         if batch is None or batch.status != "failed":

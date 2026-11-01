@@ -8,6 +8,7 @@
    ============================================================ */
 const ROUTE_VIEWS = {
   settings: '/app/settings',
+  'pairing-approve': '/app/settings/connect-device',
   autolock: '/app/settings/autolock',
   groupperm: '/app/settings/group-invites',
   blacklist: '/app/settings/blocked',
@@ -15,6 +16,7 @@ const ROUTE_VIEWS = {
   passcode: '/app/settings/passcode',
 };
 const SETTINGS_OPENERS = {
+  'connect-device': () => H.goConnectDevice(),
   autolock: () => H.goAutolock(),
   'group-invites': () => H.goGroupPerm(),
   blocked: () => H.goBlacklist(),

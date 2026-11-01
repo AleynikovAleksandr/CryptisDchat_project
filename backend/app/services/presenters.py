@@ -4,7 +4,7 @@ from __future__ import annotations
 import base64
 
 from app.models import KeyBackup, Message, User, UserKeySet, UserWallet
-from app.schemas.messages import MessageOut
+from app.schemas.messages import MessageOut, MessageReactionOut
 from app.schemas.users import MeOut, UserPublicOut, WalletOut
 
 
@@ -52,7 +52,9 @@ def me_out(user: User, wallets: list[UserWallet], keyset: UserKeySet | None, bac
     )
 
 
-def message_out(m: Message, confirmed: bool = False) -> MessageOut:
+def message_out(
+    m: Message, confirmed: bool = False, reactions: list[MessageReactionOut] | None = None,
+) -> MessageOut:
     return MessageOut(
         id=m.id,
         thread_id=m.thread_id,
@@ -71,4 +73,5 @@ def message_out(m: Message, confirmed: bool = False) -> MessageOut:
         created_at=m.created_at,
         expires_at=m.expires_at,
         confirmed=confirmed,
+        reactions=reactions or [],
     )

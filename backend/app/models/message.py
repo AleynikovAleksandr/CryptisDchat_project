@@ -61,6 +61,25 @@ class MessageSearchToken(Base):
     thread_id: Mapped[str] = mapped_column(String(36), nullable=False)
 
 
+class MessageReaction(Base):
+    """Encrypted emoji reaction; the keyed hash is used only to group equal emoji."""
+
+    __tablename__ = "message_reactions"
+    __table_args__ = (Index("ix_message_reactions_message_id", "message_id"),)
+
+    message_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    emoji_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    key_epoch: Mapped[int] = mapped_column(Integer, nullable=False)
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary(512), nullable=False)
+    nonce: Mapped[bytes] = mapped_column(LargeBinary(24), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
 class Attachment(Base):
     """Зашифрованный блоб (файл, миниатюра, аватар). Сервер не знает ни имени, ни содержимого."""
 
