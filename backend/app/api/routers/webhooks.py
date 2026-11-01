@@ -32,7 +32,7 @@ async def _signed_payload(request: Request, infra: Infra) -> dict:
     return payload
 
 
-@router.post("/webhooks/ton-tx-status")
+@router.post("/webhooks/ton-tx-status", response_model=None)
 async def ton_tx_status(request: Request, session: AsyncSession = Depends(get_session),
                         infra: Infra = Depends(get_infra)) -> dict | JSONResponse:
     payload = await _signed_payload(request, infra)
