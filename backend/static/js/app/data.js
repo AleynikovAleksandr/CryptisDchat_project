@@ -290,8 +290,12 @@ async function logout() {
   try {
     await API.post('/api/auth/logout');
   } catch (e) {
-    showToast(errorText(e));
-    return;
+    // После пересоздания БД или отзыва устройства сервер уже не знает старую
+    // сессию. Для явного выхода локально её всё равно нужно очистить.
+    if (e.status !== 401) {
+      showToast(errorText(e));
+      return;
+    }
   }
   wipeMemory();
   await VAULT.wipe(); // ТЗ 6.5: при выходе локальные данные удаляются безвозвратно
